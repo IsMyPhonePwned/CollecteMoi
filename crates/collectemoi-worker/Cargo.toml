@@ -1,0 +1,24 @@
+[package]
+name = "collectemoi-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Decrypt completed uploads into opaque blobs (no parsers)"
+
+[[bin]]
+name = "collectemoi-worker"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+collectemoi-db = { workspace = true }
+collectemoi-envelope = { workspace = true }
+hex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }

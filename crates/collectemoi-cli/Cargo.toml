@@ -1,0 +1,21 @@
+[package]
+name = "collectemoi-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI client for CollecteMoi envelope encrypt + chunked upload"
+
+[[bin]]
+name = "collectemoi"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true }
+collectemoi-envelope = { workspace = true }
+collectemoi-proto = { workspace = true }
+hex = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+uuid = { workspace = true }

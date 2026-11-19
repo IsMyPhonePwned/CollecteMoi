@@ -1,0 +1,1236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CollecteMoi — Client</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,650;12..96,800&family=IBM+Plex+Mono:wght@400;500&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #17231d;
+      --ink-soft: #43554b;
+      --muted: #687a70;
+      --line: #d6e0da;
+      --line-strong: #b2c2b8;
+      --panel: #ffffff;
+      --panel-solid: #ffffff;
+      --bg0: #f5f8f6;
+      --bg1: #eef4f0;
+      --accent: #0f6b52;
+      --accent-deep: #0b503d;
+      --accent-soft: rgba(15, 107, 82, 0.1);
+      --warn: #9a6b1a;
+      --warn-soft: rgba(154, 107, 26, 0.12);
+      --bad: #a33a3a;
+      --bad-soft: rgba(163, 58, 58, 0.1);
+      --ok: #1f7a4d;
+      --ok-soft: rgba(31, 122, 77, 0.12);
+      --display: "Bricolage Grotesque", Georgia, serif;
+      --sans: "Source Sans 3", ui-sans-serif, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, monospace;
+      --radius: 14px;
+      --shadow: 0 8px 24px rgba(21, 32, 27, 0.055);
+    }
+    body[data-theme="dark"] {
+      --ink: #e8efeb;
+      --ink-soft: #bdcbc3;
+      --muted: #93a59a;
+      --line: #2d3c34;
+      --line-strong: #46594e;
+      --panel: #1a2420;
+      --panel-solid: #1d2823;
+      --bg0: #101714;
+      --bg1: #151e19;
+      --accent: #43c49c;
+      --accent-deep: #82dfbf;
+      --accent-soft: rgba(67, 196, 156, 0.13);
+      --warn: #e5b66c;
+      --warn-soft: rgba(224, 160, 74, 0.14);
+      --bad: #ef8585;
+      --bad-soft: rgba(224, 106, 106, 0.14);
+      --ok: #55c98d;
+      --ok-soft: rgba(61, 186, 122, 0.14);
+      --shadow: 0 12px 36px rgba(0, 0, 0, 0.25);
+      color-scheme: dark;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      font-family: var(--sans);
+      font-size: 16px;
+      line-height: 1.45;
+      background: linear-gradient(180deg, #f7faf8 0, var(--bg0) 420px, var(--bg1) 100%);
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.16;
+      background-image:
+        linear-gradient(rgba(21, 32, 27, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(21, 32, 27, 0.035) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: linear-gradient(180deg, #000 0%, transparent 78%);
+    }
+
+    .shell {
+      width: min(920px, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 1.25rem 0 3.5rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* —— Top bar —— */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      animation: rise 0.55s ease both;
+    }
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 0.65rem;
+      min-width: 0;
+    }
+    .brand-mark {
+      font-family: var(--display);
+      font-weight: 800;
+      font-size: 1.35rem;
+      letter-spacing: -0.04em;
+      color: var(--accent-deep);
+      line-height: 1;
+    }
+    .brand-sub {
+      color: var(--muted);
+      font-size: 0.92rem;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.35rem 0.7rem;
+      border: 1px solid var(--line);
+      background: var(--panel-solid);
+      border-radius: 999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--ink-soft);
+      max-width: 100%;
+    }
+    .status-chip .dot {
+      width: 0.5rem;
+      height: 0.5rem;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+    }
+    .status-chip.ok .dot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+    .status-chip.bad .dot { background: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
+    .status-chip.warn .dot { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+    .status-chip .label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      font-weight: 500;
+    }
+
+    /* —— Hero —— */
+    .hero {
+      padding: 1.6rem 0 0.4rem;
+      margin-bottom: 1.4rem;
+      animation: rise 0.65s 0.05s ease both;
+    }
+    .hero h1 {
+      margin: 0;
+      font-family: var(--display);
+      font-weight: 800;
+      font-size: clamp(2.1rem, 5vw, 3.1rem);
+      letter-spacing: -0.045em;
+      line-height: 1.02;
+      color: var(--accent-deep);
+      max-width: 11ch;
+    }
+    .hero p {
+      margin: 0.85rem 0 0;
+      max-width: 36rem;
+      color: var(--ink-soft);
+      font-size: 1.05rem;
+    }
+    .steps {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      margin-top: 1.15rem;
+    }
+    .step-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.35rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: color-mix(in srgb, var(--panel-solid) 70%, transparent);
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    .step-pill .n {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--accent);
+    }
+    .step-pill.active {
+      color: var(--accent-deep);
+      border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
+      background: var(--accent-soft);
+    }
+    .step-pill.done {
+      color: var(--ok);
+      border-color: color-mix(in srgb, var(--ok) 30%, var(--line));
+      background: var(--ok-soft);
+    }
+
+    /* —— Layout —— */
+    .stack {
+      display: grid;
+      gap: 1rem;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      padding: 1.15rem 1.2rem 1.25rem;
+      animation: rise 0.7s ease both;
+    }
+    .panel:nth-child(1) { animation-delay: 0.08s; }
+    .panel:nth-child(2) { animation-delay: 0.14s; }
+    .panel:nth-child(3) { animation-delay: 0.2s; }
+    .panel-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 0.95rem;
+    }
+    .panel-head h2 {
+      margin: 0;
+      font-family: var(--display);
+      font-size: 1.2rem;
+      font-weight: 650;
+      letter-spacing: -0.03em;
+    }
+    .panel-head p {
+      margin: 0.2rem 0 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .badge {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 0.28rem 0.55rem;
+      border-radius: 6px;
+      background: var(--accent-soft);
+      color: var(--accent-deep);
+      white-space: nowrap;
+    }
+    .badge.muted { background: rgba(106, 124, 114, 0.12); color: var(--muted); }
+    .badge.ok { background: var(--ok-soft); color: var(--ok); }
+    .badge.warn { background: var(--warn-soft); color: var(--warn); }
+
+    label {
+      display: grid;
+      gap: 0.35rem;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--ink-soft);
+      margin-bottom: 0.75rem;
+    }
+    input, select {
+      font: inherit;
+      font-weight: 500;
+      padding: 0.65rem 0.75rem;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      color: var(--ink);
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    input:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    .hint {
+      margin: -0.35rem 0 0.75rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 500;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem 1rem;
+    }
+    @media (max-width: 700px) {
+      .grid-2 { grid-template-columns: 1fr; }
+      .brand-sub { display: none; }
+      .hero h1 { max-width: none; }
+    }
+
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      align-items: center;
+    }
+    button {
+      font: inherit;
+      font-weight: 650;
+      border: 1px solid var(--line-strong);
+      background: #fff;
+      color: var(--ink);
+      padding: 0.62rem 0.95rem;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: transform 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+    }
+    button:hover { transform: translateY(-1px); }
+    button:active { transform: translateY(0); }
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #f4fffa;
+    }
+    button.primary:hover { background: var(--accent-deep); border-color: var(--accent-deep); }
+    button.ghost {
+      background: transparent;
+      border-color: transparent;
+      color: var(--muted);
+    }
+    button.ghost:hover { color: var(--ink); background: rgba(21, 32, 27, 0.04); }
+    button:disabled { opacity: 0.55; cursor: wait; transform: none; }
+
+    .flash {
+      min-height: 1.2rem;
+      margin: 0.35rem 0 0;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--ok);
+    }
+    .flash.err { color: var(--bad); }
+    .flash:empty { display: none; }
+
+    .mono { font-family: var(--mono); font-size: 0.82em; word-break: break-all; }
+    .muted { color: var(--muted); }
+
+    /* Session identity */
+    .identity {
+      display: grid;
+      gap: 0.85rem;
+    }
+    .identity-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem 1.1rem;
+      align-items: baseline;
+    }
+    .identity-summary .name {
+      font-family: var(--display);
+      font-weight: 650;
+      font-size: 1.15rem;
+      letter-spacing: -0.02em;
+    }
+    .kv {
+      display: grid;
+      gap: 0.45rem;
+      margin-top: 0.25rem;
+    }
+    .kv-row {
+      display: grid;
+      grid-template-columns: 8.2rem 1fr auto;
+      gap: 0.55rem;
+      align-items: start;
+      padding: 0.55rem 0.65rem;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.55);
+      border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+    }
+    .kv-row .k { color: var(--muted); font-size: 0.78rem; font-weight: 600; padding-top: 0.15rem; }
+    .kv-row .v {
+      font-family: var(--mono);
+      font-size: 0.74rem;
+      line-height: 1.4;
+      word-break: break-all;
+    }
+    .kv-row button.copy {
+      font-size: 0.72rem;
+      padding: 0.25rem 0.5rem;
+      border-radius: 7px;
+    }
+    details.keys {
+      border-top: 1px solid var(--line);
+      padding-top: 0.75rem;
+      margin-top: 0.25rem;
+    }
+    details.keys summary {
+      cursor: pointer;
+      font-weight: 650;
+      color: var(--ink-soft);
+      list-style: none;
+    }
+    details.keys summary::-webkit-details-marker { display: none; }
+    details.keys summary::before {
+      content: "▸";
+      display: inline-block;
+      margin-right: 0.4rem;
+      color: var(--accent);
+      transition: transform 0.15s ease;
+    }
+    details.keys[open] summary::before { transform: rotate(90deg); }
+
+    /* Enroll flow */
+    .enroll-flow {
+      display: grid;
+      gap: 1rem;
+    }
+    .phase {
+      padding: 0.9rem 0.95rem;
+      border-radius: 12px;
+      border: 1px dashed var(--line);
+      background: rgba(255, 255, 255, 0.35);
+    }
+    .phase.active {
+      border-style: solid;
+      border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+      background: color-mix(in srgb, var(--accent-soft) 45%, #fff);
+    }
+    .phase-title {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.7rem;
+      font-weight: 700;
+      color: var(--accent-deep);
+    }
+    .phase-title .n {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      width: 1.4rem;
+      height: 1.4rem;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+    }
+    .otp-box {
+      display: none;
+      margin-top: 0.25rem;
+    }
+    .otp-box.show { display: block; animation: rise 0.35s ease both; }
+    .otp-banner {
+      padding: 0.7rem 0.8rem;
+      border-radius: 10px;
+      background: var(--warn-soft);
+      border: 1px solid color-mix(in srgb, var(--warn) 25%, transparent);
+      color: var(--warn);
+      font-size: 0.88rem;
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+    }
+
+    /* Requests */
+    .req-list {
+      display: grid;
+      gap: 0.55rem;
+    }
+    .req-item {
+      display: grid;
+      gap: 0.25rem;
+      padding: 0.8rem 0.85rem;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.65);
+    }
+    .req-item h3 {
+      margin: 0;
+      font-size: 0.98rem;
+      font-weight: 700;
+    }
+    .req-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 0.75rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+    .tag {
+      display: inline-flex;
+      padding: 0.15rem 0.45rem;
+      border-radius: 6px;
+      background: var(--accent-soft);
+      color: var(--accent-deep);
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      font-weight: 500;
+    }
+    .empty {
+      padding: 1.25rem 0.5rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    /* Upload */
+    .drop {
+      position: relative;
+      border: 1.5px dashed var(--line-strong);
+      border-radius: 12px;
+      padding: 1.35rem 1rem;
+      text-align: center;
+      background: rgba(255, 255, 255, 0.45);
+      transition: border-color 0.15s ease, background 0.15s ease;
+      margin-bottom: 0.85rem;
+    }
+    .drop.drag {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .drop strong {
+      display: block;
+      font-family: var(--display);
+      font-size: 1.05rem;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.2rem;
+    }
+    .drop input[type="file"] {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      cursor: pointer;
+    }
+    .file-picked {
+      margin: 0.35rem 0 0.85rem;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      color: var(--ink-soft);
+    }
+    .result {
+      margin-top: 0.85rem;
+      padding: 0.75rem 0.85rem;
+      border-radius: 10px;
+      background: var(--ok-soft);
+      border: 1px solid color-mix(in srgb, var(--ok) 25%, transparent);
+      display: none;
+    }
+    .result.show { display: block; animation: rise 0.35s ease both; }
+    .result h4 {
+      margin: 0 0 0.35rem;
+      font-size: 0.9rem;
+      color: var(--ok);
+    }
+    .result .mono { font-size: 0.75rem; }
+
+    .hidden { display: none !important; }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
+
+    :where(button, input, select, textarea):focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .topbar {
+      padding-bottom: 0.9rem;
+      border-bottom: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+    }
+    .theme-select {
+      min-height: 2.2rem;
+      padding: 0.3rem 2rem 0.3rem 0.65rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel-solid);
+      color: var(--ink-soft);
+      font: 600 0.78rem var(--sans);
+    }
+    .brand-mark {
+      font-family: var(--sans);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+    }
+    .hero { padding-top: 2rem; }
+    .hero h1 { letter-spacing: -0.035em; }
+    .panel {
+      background: var(--panel-solid);
+      border-color: var(--line);
+      box-shadow: 0 6px 20px rgba(21, 32, 27, 0.045);
+      backdrop-filter: none;
+      padding: 1.3rem 1.35rem 1.4rem;
+    }
+    .panel-head { margin-bottom: 1.1rem; }
+    .panel-head h2 { letter-spacing: -0.025em; }
+    input, select {
+      border-radius: 9px;
+      border-color: var(--line-strong);
+      min-height: 2.7rem;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+    button, .btn { border-radius: 9px; }
+    button.primary { font-weight: 700; }
+    .phase, .req-item, .drop { border-radius: 11px; }
+    .drop { background: #f8fbf9; }
+    body[data-theme="dark"] { background: linear-gradient(180deg, #111a16 0, var(--bg0) 420px, var(--bg1) 100%); }
+    body[data-theme="dark"]::before {
+      background-image:
+        linear-gradient(rgba(220, 238, 228, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(220, 238, 228, 0.025) 1px, transparent 1px);
+      opacity: 0.28;
+    }
+    body[data-theme="dark"] .kv-row { background: rgba(255, 255, 255, 0.035); }
+    body[data-theme="dark"] .phase { background: rgba(255, 255, 255, 0.025); }
+    body[data-theme="dark"] .phase.active { background: rgba(67, 196, 156, 0.1); }
+    body[data-theme="dark"] .req-item { background: rgba(255, 255, 255, 0.035); }
+    body[data-theme="dark"] .drop { background: #17211c; }
+    body[data-theme="dark"] .drop.drag { background: var(--accent-soft); }
+    body[data-theme="dark"] button.primary { color: #08251b; }
+    body[data-theme="dark"] input, body[data-theme="dark"] select {
+      background: #18221e;
+      color: var(--ink);
+      border-color: var(--line-strong);
+    }
+    body[data-theme="dark"] button:not(.primary) {
+      background: var(--panel-solid);
+      color: var(--ink);
+      border-color: var(--line-strong);
+    }
+    body[data-theme="dark"] button.ghost { background: transparent; color: var(--muted); }
+    .history-list { display: grid; gap: 0.6rem; }
+    .submission-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 0.3rem 1rem;
+      padding: 0.8rem 0.9rem;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: var(--panel-solid);
+    }
+    .submission-item .title { font-weight: 700; }
+    .submission-item .meta { color: var(--muted); font-size: 0.8rem; }
+    .submission-item .badge { grid-column: 2; grid-row: 1 / 3; }
+    @media (max-width: 600px) {
+      .shell { width: min(100% - 1.25rem, 920px); padding-top: 0.8rem; }
+      .hero { padding-top: 1.35rem; }
+      .panel { padding: 1rem; }
+      .kv-row { grid-template-columns: 1fr auto; }
+      .kv-row .k { grid-column: 1 / -1; }
+      .kv-row .v { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="topbar">
+      <div class="brand">
+        <div class="brand-mark">CollecteMoi</div>
+        <div class="brand-sub">desktop client</div>
+      </div>
+      <div class="row">
+        <select class="theme-select" id="theme-select" aria-label="Choose client theme">
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+        <div class="status-chip warn" id="api-chip" title="API reachability">
+          <span class="dot"></span>
+          <span class="label" id="api-chip-label">checking…</span>
+        </div>
+      </div>
+    </div>
+
+    <header class="hero">
+      <h1 id="hero-title">CollecteMoi</h1>
+      <p id="hero-copy">Enroll this machine, review what the lab asks for, then seal and upload a local file over HTTPS.</p>
+      <div class="steps" id="flow-steps" aria-label="Progress">
+        <span class="step-pill active" data-step="1"><span class="n">1</span> Enroll</span>
+        <span class="step-pill" data-step="2"><span class="n">2</span> Requests</span>
+        <span class="step-pill" data-step="3"><span class="n">3</span> Upload</span>
+      </div>
+    </header>
+
+    <div class="stack">
+      <!-- Session / enroll -->
+      <section class="panel" id="panel-session">
+        <div class="panel-head">
+          <div>
+            <h2 id="session-heading">Session</h2>
+            <p id="session-sub">Connect this desktop to the CollecteMoi API.</p>
+          </div>
+          <span class="badge muted" id="session-badge">Not enrolled</span>
+        </div>
+
+        <div id="session-enrolled" class="identity hidden">
+          <div class="identity-summary">
+            <span class="name" id="sess-name">—</span>
+            <span class="muted" id="sess-email"></span>
+          </div>
+          <div class="req-meta">
+            <span>device <span class="mono" id="sess-device">—</span></span>
+            <span>case <span class="mono" id="sess-case">—</span></span>
+            <span class="mono" id="sess-server">—</span>
+          </div>
+          <details class="keys">
+            <summary>Keys &amp; fingerprints</summary>
+            <div class="kv" id="session-keys"></div>
+          </details>
+          <div class="row" style="margin-top:0.35rem">
+            <button type="button" class="ghost" id="btn-clear">Clear session</button>
+          </div>
+        </div>
+
+        <div id="session-enroll" class="enroll-flow">
+          <div class="phase active" id="phase-start">
+            <div class="phase-title"><span class="n">1</span> Request a code</div>
+            <label>API server
+              <input id="server" type="url" value="https://127.0.0.1:8080" autocomplete="url" />
+            </label>
+            <p class="hint">Use the HTTPS URL from <span class="mono">collectemoictl status</span>.</p>
+            <div class="grid-2">
+              <label>Work email
+                <input id="email" type="email" placeholder="you@company.com" value="analyst@example.com" autocomplete="email" />
+              </label>
+              <label>Or lab key
+                <input id="lab-key" type="text" placeholder="LAB-DEMO01" value="LAB-DEMO01" autocomplete="off" />
+              </label>
+            </div>
+            <p class="hint">Lab keys skip email delivery and are for local testing only.</p>
+            <div class="row">
+              <button class="primary" id="btn-start" type="button">Send code</button>
+            </div>
+          </div>
+
+          <div class="otp-box" id="otp-box">
+            <div class="phase active" id="phase-confirm">
+              <div class="phase-title"><span class="n">2</span> Confirm enrollment</div>
+              <div class="otp-banner" id="otp-hint"></div>
+              <label>Verification code
+                <input id="otp" type="text" inputmode="numeric" placeholder="6-digit code or lab key" autocomplete="one-time-code" />
+              </label>
+              <div class="row">
+                <button class="primary" id="btn-confirm" type="button">Confirm &amp; enroll</button>
+                <button type="button" class="ghost" id="btn-restart-enroll">Start over</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p class="flash" id="flash" role="status"></p>
+      </section>
+
+      <!-- Server-side history for this enrolled device -->
+      <section class="panel" id="panel-history">
+        <div class="panel-head">
+          <div>
+            <h2>Submission history</h2>
+            <p>Uploads received by the lab from this enrolled device.</p>
+          </div>
+          <button type="button" id="btn-submissions" disabled>Refresh</button>
+        </div>
+        <div class="history-list" id="submissions" aria-live="polite">
+          <div class="empty">Enroll to view submission history.</div>
+        </div>
+      </section>
+
+      <!-- Requests -->
+      <section class="panel" id="panel-requests">
+        <div class="panel-head">
+          <div>
+            <h2>Collection requests</h2>
+            <p>What the lab currently asks this device to collect.</p>
+          </div>
+          <button type="button" id="btn-requests">Refresh</button>
+        </div>
+        <div class="req-list" id="requests">
+          <div class="empty">Enroll first to load requests.</div>
+        </div>
+      </section>
+
+      <!-- Upload -->
+      <section class="panel" id="panel-upload">
+        <div class="panel-head">
+          <div>
+            <h2>Seal &amp; upload</h2>
+            <p>Encrypt a local file to the case key, then send it in chunks.</p>
+          </div>
+        </div>
+        <label>Artefact type
+          <select id="artefact">
+            <option value="android_bugreport">Android bugreport</option>
+            <option value="ios_sysdiagnose">iOS sysdiagnose</option>
+            <option value="message_report">Message report</option>
+          </select>
+        </label>
+        <div class="drop" id="drop">
+          <strong>Drop a file here</strong>
+          <span class="muted">or click to browse</span>
+          <input id="file" type="file" />
+        </div>
+        <p class="file-picked muted" id="file-label">No file selected</p>
+        <div class="row">
+          <button class="primary" id="btn-upload" type="button" disabled>Seal &amp; upload</button>
+        </div>
+        <div class="result" id="upload-result">
+          <h4>Upload complete</h4>
+          <div class="mono" id="upload-result-body"></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const themeSelect = $("theme-select");
+    const storedTheme = localStorage.getItem("collectemoi-client-theme");
+    const initialTheme = storedTheme === "dark" ? "dark" : "light";
+    document.body.dataset.theme = initialTheme;
+    themeSelect.value = initialTheme;
+    themeSelect.addEventListener("change", () => {
+      document.body.dataset.theme = themeSelect.value;
+      localStorage.setItem("collectemoi-client-theme", themeSelect.value);
+    });
+    const state = {
+      session: null,
+      apiServer: "https://127.0.0.1:8080",
+      pending: null,
+    };
+
+    function flash(msg, err = false) {
+      const el = $("flash");
+      el.textContent = msg || "";
+      el.className = "flash" + (err ? " err" : "");
+    }
+
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
+      );
+    }
+
+    function shortId(id) {
+      const s = String(id || "");
+      if (s.length <= 18) return s;
+      return s.slice(0, 8) + "…" + s.slice(-6);
+    }
+
+    function formatBytes(n) {
+      const v = Number(n);
+      if (!Number.isFinite(v)) return "—";
+      const u = ["B", "KB", "MB", "GB"];
+      let x = v, i = 0;
+      while (x >= 1024 && i < u.length - 1) { x /= 1024; i++; }
+      return i === 0 ? `${Math.round(x)} ${u[i]}` : `${x.toFixed(1)} ${u[i]}`;
+    }
+
+    async function api(path, opts) {
+      const res = await fetch(path, opts);
+      const text = await res.text();
+      let body = null;
+      try { body = text ? JSON.parse(text) : null; } catch { body = { error: text }; }
+      if (!res.ok) throw new Error((body && body.error) || text || res.statusText);
+      return body;
+    }
+
+    function setSteps(enrolled, readyToUpload) {
+      document.querySelectorAll(".step-pill").forEach((el) => {
+        const n = Number(el.getAttribute("data-step"));
+        el.classList.remove("active", "done");
+        if (!enrolled) {
+          if (n === 1) el.classList.add("active");
+          return;
+        }
+        if (n === 1) el.classList.add("done");
+        if (!readyToUpload) {
+          if (n === 2) el.classList.add("active");
+          return;
+        }
+        if (n === 2) el.classList.add("done");
+        if (n === 3) el.classList.add("active");
+      });
+    }
+
+    function setApiChip(ok, label) {
+      const chip = $("api-chip");
+      chip.className = "status-chip " + (ok === true ? "ok" : ok === false ? "bad" : "warn");
+      $("api-chip-label").textContent = label;
+    }
+
+    function renderSubmissions(list) {
+      const el = $("submissions");
+      if (!state.session) {
+        el.innerHTML = `<div class="empty">Enroll to view submission history.</div>`;
+        $("btn-submissions").disabled = true;
+        return;
+      }
+      $("btn-submissions").disabled = false;
+      if (!list || !list.length) {
+        el.innerHTML = `<div class="empty">No submissions have reached the lab yet.</div>`;
+        return;
+      }
+      el.innerHTML = list.map((item) => {
+        const status = String(item.status || "pending").toLowerCase();
+        const tone = status === "done" ? "ok" : status === "failed" ? "bad" : "warn";
+        const label = status === "done" ? "Received" : status === "failed" ? "Processing failed" : "Processing";
+        const rawTime = Number(item.submitted_at);
+        const date = Number.isFinite(rawTime)
+          ? new Date(rawTime * 1000)
+          : new Date(item.submitted_at);
+        const when = Number.isNaN(date.getTime()) ? "Date unavailable" : date.toLocaleString();
+        return `<article class="submission-item">
+          <div class="title">${esc(item.artefact)}</div>
+          <div class="meta">${esc(when)} · ${esc(formatBytes(item.size_bytes))} · upload ${esc(shortId(item.upload_id))}</div>
+          <span class="badge ${tone}">${esc(label)}</span>
+        </article>`;
+      }).join("");
+    }
+
+    async function loadSubmissions() {
+      if (!state.session) {
+        renderSubmissions([]);
+        return;
+      }
+      $("btn-submissions").disabled = false;
+      $("submissions").innerHTML = `<div class="empty">Loading submission history…</div>`;
+      try {
+        const body = await api("/api/submissions");
+        renderSubmissions(body.submissions || []);
+      } catch (e) {
+        $("btn-submissions").disabled = false;
+        $("submissions").innerHTML = `<div class="empty" style="color:var(--bad)">${esc(e.message || e)} <button type="button" id="btn-submissions-retry">Retry</button></div>`;
+        $("btn-submissions-retry").onclick = loadSubmissions;
+      }
+    }
+
+    function kvRow(label, value) {
+      if (!value) return "";
+      const v = String(value);
+      return `<div class="kv-row">
+        <div class="k">${esc(label)}</div>
+        <div class="v" title="${esc(v)}">${esc(v)}</div>
+        <button type="button" class="copy" data-copy="${esc(v)}">Copy</button>
+      </div>`;
+    }
+
+    function renderSession() {
+      const s = state.session;
+      const enrolled = !!s;
+      $("session-enrolled").classList.toggle("hidden", !enrolled);
+      $("session-enroll").classList.toggle("hidden", enrolled);
+      $("btn-upload").disabled = !enrolled || !$("file").files?.[0];
+
+      if (!enrolled) {
+        $("session-badge").textContent = "Not enrolled";
+        $("session-badge").className = "badge muted";
+        $("session-heading").textContent = "Enroll this desktop";
+        $("session-sub").textContent = "Verify with email OTP or a lab key, then this machine gets device keys.";
+        $("hero-title").textContent = "CollecteMoi";
+        $("hero-copy").textContent =
+          "Enroll this machine, review what the lab asks for, then seal and upload a local file over HTTPS.";
+        setSteps(false, false);
+        return;
+      }
+
+      $("session-badge").textContent = "Enrolled";
+      $("session-badge").className = "badge ok";
+      $("session-heading").textContent = "This device";
+      $("session-sub").textContent = "Keys stay in the local session file on this machine.";
+      $("hero-title").textContent = s.displayName || "Enrolled";
+      $("hero-copy").textContent =
+        "You are connected. Refresh requests, then seal a local file for upload.";
+
+      $("sess-name").textContent = s.displayName || "Device";
+      $("sess-email").textContent = s.email || s.companyId || "";
+      $("sess-device").textContent = shortId(s.deviceId);
+      $("sess-device").title = s.deviceId || "";
+      $("sess-case").textContent = shortId(s.caseId);
+      $("sess-case").title = s.caseId || "";
+      $("sess-server").textContent = s.serverBaseUrl || "";
+
+      const keysEl = $("session-keys");
+      keysEl.innerHTML =
+        kvRow("Noise key", s.noiseKeyHex) +
+        kvRow("Noise fingerprint", s.noiseKeyFingerprint) +
+        kvRow("Device public key", s.devicePublicKeyHex) +
+        kvRow("Case public key", s.casePublicKeyHex) +
+        kvRow("Device id", s.deviceId) +
+        kvRow("Case id", s.caseId);
+      keysEl.querySelectorAll("[data-copy]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(btn.getAttribute("data-copy") || "");
+            flash("Copied to clipboard");
+          } catch (e) {
+            flash(String(e.message || e), true);
+          }
+        });
+      });
+
+      if (s.serverBaseUrl) $("server").value = s.serverBaseUrl;
+      setSteps(true, false);
+    }
+
+    function renderRequests(list) {
+      const el = $("requests");
+      if (!state.session) {
+        el.innerHTML = `<div class="empty">Enroll first to load requests.</div>`;
+        return;
+      }
+      if (!list || !list.length) {
+        el.innerHTML = `<div class="empty">No open collection requests right now.</div>`;
+        setSteps(true, true);
+        return;
+      }
+      el.innerHTML = list.map((r) => {
+        const arts = (r.artefacts || []).map((a) => `<span class="tag">${esc(a)}</span>`).join(" ");
+        const deadline = r.deadline ? `deadline ${esc(r.deadline)}` : "no deadline";
+        return `<article class="req-item">
+          <h3>${esc(r.title || "Collection request")}</h3>
+          <div class="req-meta">
+            <span class="mono">${esc(shortId(r.id))}</span>
+            <span>${deadline}</span>
+            <span>${arts || "<span class='muted'>no artefacts listed</span>"}</span>
+          </div>
+        </article>`;
+      }).join("");
+      setSteps(true, true);
+    }
+
+    async function refreshSession() {
+      const body = await api("/api/session");
+      state.session = body.session || null;
+      state.apiServer = body.apiServer || state.apiServer;
+      if (!state.session && body.apiServer) $("server").value = body.apiServer;
+      renderSession();
+      setApiChip(null, (body.apiServer || state.apiServer).replace(/^https?:\/\//, ""));
+    }
+
+    async function probeApi() {
+      try {
+        const body = await api("/api/health");
+        const host = (body.apiServer || state.apiServer || "").replace(/^https?:\/\//, "");
+        if (body.ok) setApiChip(true, host || "API ok");
+        else setApiChip(false, host ? `${host} unreachable` : "API down");
+      } catch {
+        setApiChip(false, "UI proxy error");
+      }
+    }
+
+    async function loadRequests() {
+      if (!state.session) {
+        renderRequests([]);
+        return;
+      }
+      try {
+        const body = await api("/api/requests");
+        renderRequests(body.requests || []);
+      } catch (e) {
+        $("requests").innerHTML = `<div class="empty" style="color:var(--bad)">${esc(e.message || e)}</div>`;
+      }
+    }
+
+    let pendingChallenge = null;
+
+    $("btn-start").onclick = async () => {
+      flash("Requesting code…");
+      $("btn-start").disabled = true;
+      try {
+        const email = $("email").value.trim();
+        const labKey = $("lab-key").value.trim();
+        const body = { server: $("server").value.trim() };
+        if (labKey) body.lab_key = labKey;
+        else body.email = email;
+        const started = await api("/api/enroll/start", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        pendingChallenge = started;
+        $("otp-box").classList.add("show");
+        if (started.labOtp) {
+          $("otp").value = started.labOtp;
+          $("otp-hint").textContent =
+            `Lab OTP for ${started.emailMasked} (${started.companyName}): ${started.labOtp}`;
+        } else {
+          $("otp").value = "";
+          $("otp-hint").textContent =
+            `Code sent to ${started.emailMasked} · ${started.companyName} · expires in ${started.expiresInSecs}s`;
+        }
+        $("otp").focus();
+        flash(started.message || "Code issued");
+        await probeApi();
+      } catch (e) {
+        flash(String(e.message || e), true);
+        await probeApi();
+      } finally {
+        $("btn-start").disabled = false;
+      }
+    };
+
+    $("btn-restart-enroll").onclick = () => {
+      pendingChallenge = null;
+      $("otp-box").classList.remove("show");
+      $("otp").value = "";
+      flash("");
+    };
+
+    $("btn-confirm").onclick = async () => {
+      if (!pendingChallenge) {
+        flash("Send a code first", true);
+        return;
+      }
+      flash("Confirming enrollment…");
+      $("btn-confirm").disabled = true;
+      try {
+        await api("/api/enroll/confirm", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            server: $("server").value.trim(),
+            challengeId: pendingChallenge.challengeId,
+            code: $("otp").value.trim(),
+            email: pendingChallenge.email,
+            companyId: pendingChallenge.companyId,
+          }),
+        });
+        flash("Enrolled — device keys saved locally");
+        pendingChallenge = null;
+        $("otp-box").classList.remove("show");
+        await refreshSession();
+        await loadRequests();
+        await loadSubmissions();
+        await probeApi();
+      } catch (e) {
+        flash(String(e.message || e), true);
+      } finally {
+        $("btn-confirm").disabled = false;
+      }
+    };
+
+    $("btn-clear").onclick = async () => {
+      if (!confirm("Clear the local session on this machine?")) return;
+      try {
+        await api("/api/session", { method: "DELETE" });
+        flash("Session cleared");
+        pendingChallenge = null;
+        $("otp-box").classList.remove("show");
+        await refreshSession();
+        renderRequests([]);
+        renderSubmissions([]);
+      } catch (e) {
+        flash(String(e.message || e), true);
+      }
+    };
+
+    $("btn-requests").onclick = loadRequests;
+    $("btn-submissions").onclick = loadSubmissions;
+
+    const drop = $("drop");
+    const fileInput = $("file");
+    function syncFileLabel() {
+      const f = fileInput.files?.[0];
+      $("file-label").textContent = f
+        ? `${f.name} · ${formatBytes(f.size)}`
+        : "No file selected";
+      $("btn-upload").disabled = !state.session || !f;
+      $("upload-result").classList.remove("show");
+    }
+    fileInput.addEventListener("change", syncFileLabel);
+    ["dragenter", "dragover"].forEach((ev) => {
+      drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("drag"); });
+    });
+    ["dragleave", "drop"].forEach((ev) => {
+      drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("drag"); });
+    });
+    drop.addEventListener("drop", (e) => {
+      const f = e.dataTransfer?.files?.[0];
+      if (!f) return;
+      const dt = new DataTransfer();
+      dt.items.add(f);
+      fileInput.files = dt.files;
+      syncFileLabel();
+    });
+
+    $("btn-upload").onclick = async () => {
+      const file = fileInput.files?.[0];
+      if (!file) {
+        flash("Pick a file first", true);
+        return;
+      }
+      if (!state.session) {
+        flash("Enroll first", true);
+        return;
+      }
+      flash(`Sealing & uploading ${file.name}…`);
+      $("btn-upload").disabled = true;
+      $("upload-result").classList.remove("show");
+      try {
+        const res = await fetch(
+          `/api/upload?artefact=${encodeURIComponent($("artefact").value)}&filename=${encodeURIComponent(file.name)}`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/octet-stream" },
+            body: file,
+          },
+        );
+        const text = await res.text();
+        const body = text ? JSON.parse(text) : {};
+        if (!res.ok) throw new Error(body.error || text || res.statusText);
+        $("upload-result-body").textContent =
+          `upload ${body.uploadId}\n` +
+          `${body.filename} · ${body.artefact}\n` +
+          `plaintext ${formatBytes(body.plaintextBytes)} → envelope ${formatBytes(body.envelopeBytes)}`;
+        $("upload-result").classList.add("show");
+        flash(`Uploaded ${file.name}`);
+        await loadSubmissions();
+      } catch (e) {
+        flash(String(e.message || e), true);
+      } finally {
+        $("btn-upload").disabled = !state.session || !fileInput.files?.[0];
+      }
+    };
+
+    refreshSession()
+      .then(() => Promise.all([loadRequests(), loadSubmissions(), probeApi()]))
+      .catch((e) => flash(String(e.message || e), true));
+  </script>
+</body>
+</html>

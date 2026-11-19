@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Start the CollecteMoi desktop TypeScript client UI.
+# Configuration is CLI flags only.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CLIENT="$ROOT/clients/node"
+
+BIND="127.0.0.1"
+PORT="8090"
+SERVER="https://127.0.0.1:8080"
+SESSION="$CLIENT/.collectemoi/session.json"
+OPEN=0
+INSECURE=1
+TLS_CA=""
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [options]
+
+Options:
+  --bind <host>       UI listen host (default: 127.0.0.1)
+  --port <n>          UI listen port (default: 8090)
+  --server <url>      CollecteMoi API URL (default: https://127.0.0.1:8080)
+  --session <path>    Session file (default: clients/node/.collectemoi/session.json)
+  --insecure          Trust self-signed API cert (default)
+  --secure            Require valid TLS cert
+  --tls-ca <pem>      Trust this CA/cert PEM
+  --no-open           Do not open a browser tab (default)
+  --open              Open a browser tab on start
+  -h, --help          Show help
+
+Examples:
+  $(basename "$0")
+  $(basename "$0") --open
+  $(basename "$0") --server https://127.0.0.1:8080 --tls-ca ./data/tls/server.crt
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --bind) BIND="$2"; shift 2 ;;
+    --port) PORT="$2"; shift 2 ;;
+    --server) SERVER="$2"; shift 2 ;;
+    --session) SESSION="$2"; shift 2 ;;
+    --insecure) INSECURE=1; shift ;;
+    --secure) INSECURE=0; shift ;;
+    --tls-ca) TLS_CA="$2"; INSECURE=0; shift 2 ;;
+    --no-open) OPEN=0; shift ;;
+    --open) OPEN=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown option: $1" >&2; usage; exit 1 ;;
+  esac
+done
+
+if [[ ! -d "$CLIENT/node_modules" ]]; then
+  echo "installing clients/node dependencies…"
+  (cd "$CLIENT" && npm install)
+fi
+
+ARGS=(--bind "$BIND" --port "$PORT" --server "$SERVER" --session "$SESSION")
+if [[ "$OPEN" -eq 1 ]]; then
+  ARGS+=(--open)
+else
+  ARGS+=(--no-open)
+fi
+if [[ "$INSECURE" -eq 1 ]]; then
+  ARGS+=(--insecure)
+else
+  ARGS+=(--secure)
+fi
+if [[ -n "$TLS_CA" ]]; then
+  ARGS+=(--tls-ca "$TLS_CA")
+fi
+
+cd "$CLIENT"
+exec npx tsx src/ui/server.ts "${ARGS[@]}"

@@ -1,0 +1,937 @@
+#!/usr/bin/env bash
+# CollecteMoi mobile lab builds — Android APK / iOS (simulator or device) for testing.
+# Configuration is CLI flags only.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+APP="$ROOT/app"
+OUT="$ROOT/dist/mobile"
+PUBLISH="$ROOT/data/mobile"   # served by admin UI (/v1/admin/mobile)
+CTL_VERSION="0.2.0"
+
+export PATH="/opt/homebrew/share/flutter/bin:${PATH:-}"
+
+MODE="debug"          # debug | profile | release
+PLATFORM=""           # android | ios | all (set by subcommand / flags)
+DEVICE=""
+SERVER_URL=""
+TENANT_DIR=""         # branding dir (tenant.json + theme.json + assets/)
+DISPLAY_NAME=""
+LOGO_PATH=""
+ICON_PATH=""
+ICON_TEXT=""          # Optional text rendered directly on the launcher image
+ICON_FONT="system"
+ICON_SIZE="14"
+ICON_X="50"
+ICON_Y="82"
+ICON_SCALE="100"
+ICON_ROTATION="0"
+ICON_COLOR="#FFFFFF"
+ICON_BADGE="true"
+ICON_BADGE_COLOR="#000000"
+ICON_BADGE_OPACITY="72"
+APP_VERSION=""        # branding / marketing version → Flutter --build-name
+BUILD_NUMBER=""       # Flutter --build-number (integer); derived from APP_VERSION when empty
+OPEN=0
+INSTALL=0
+SIMULATOR=1           # iOS: build for Simulator.app (lab default)
+NO_CODESIGN=1         # iOS device/archive builds without signing by default
+CLEAN=0
+QUIET=0
+
+# ─── presentation ───────────────────────────────────────────────────────────
+
+_use_color() {
+  [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]] && [[ "${TERM:-}" != "dumb" ]]
+}
+
+if _use_color; then
+  C_RESET=$'\033[0m'
+  C_DIM=$'\033[2m'
+  C_BOLD=$'\033[1m'
+  C_RED=$'\033[31m'
+  C_GREEN=$'\033[32m'
+  C_YELLOW=$'\033[33m'
+  C_CYAN=$'\033[36m'
+else
+  C_RESET=""; C_DIM=""; C_BOLD=""; C_RED=""; C_GREEN=""; C_YELLOW=""; C_CYAN=""
+fi
+
+ok()   { printf '%s✓%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
+warn() { printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
+err()  { printf '%s✗%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; }
+info() { [[ "$QUIET" -eq 1 ]] || printf '%s·%s %s\n' "$C_CYAN" "$C_RESET" "$*"; }
+hdr()  {
+  printf '\n%s%s%s\n' "$C_BOLD" "$1" "$C_RESET"
+  printf '%s%s%s\n' "$C_DIM" "$(printf '─%.0s' {1..56})" "$C_RESET"
+}
+kv() {
+  printf '  %-14s %s' "$1" "$2"
+  if [[ -n "${3:-}" ]]; then
+    printf '  %s%s%s' "$C_DIM" "$3" "$C_RESET"
+  fi
+  printf '\n'
+}
+
+usage() {
+  local b
+  b="$(basename "$0")"
+  cat <<EOF
+${C_BOLD}CollecteMoi app${C_RESET} ${C_DIM}v${CTL_VERSION}${C_RESET} — Flutter Android / iOS lab builds
+
+${C_BOLD}USAGE${C_RESET}
+  $b <command> [options]
+
+${C_BOLD}COMMANDS${C_RESET}
+  build [android|ios|all]   Build test artefacts (default: all)
+  apk                       Shorthand: debug Android APK → dist/mobile/
+  ios                       Shorthand: iOS build (simulator by default)
+  run                       flutter run (picks a phone/emulator if possible)
+  install                   adb install -r the latest APK under dist/mobile/
+  devices                   List Flutter devices
+  emulators                 List / launch emulators
+  doctor                    flutter doctor -v (short) + toolchain tips
+  clean                     flutter clean + wipe dist/mobile
+  open                      Reveal dist/mobile in Finder
+  version                   Script + Flutter versions
+
+${C_BOLD}OPTIONS${C_RESET}
+  --debug | --profile | --release   Build mode (default: debug)
+  --android | --ios | --all         Platform filter for build/run
+  --device <id>                     Flutter device id (see: $b devices)
+  --server <url>                    Bake COLLECTEMOI_SERVER_URL into the binary
+  --tenant-dir <path>               Branding dir (tenant.json, theme.json, assets/)
+  --display-name <name>             Launcher / in-app display name
+  --app-version <x.y.z>             App version baked into APK/IPA (Flutter --build-name)
+  --build-number <n>                Android versionCode / iOS CFBundleVersion
+  --logo <png|jpg|webp>             In-app enroll logo
+  --icon <png>                      Launcher icon source (resized with sips when present)
+  --icon-text <text>                Draw up to 24 characters directly on the launcher image
+  --icon-font <system|rounded|serif|monospaced>
+  --icon-size <8-32>                Text size as a percent of the icon canvas
+  --icon-x / --icon-y <0-100>       Text center position (percent from left / top)
+  --icon-scale <40-180>             Launcher image size (100 is full size)
+  --icon-rotation <-180..180>        Rotate launcher image clockwise in degrees
+  --icon-color <#RRGGBB>            Text color
+  --icon-badge <true|false>          Show a background behind the text
+  --icon-badge-color <#RRGGBB>       Text background color
+  --icon-badge-opacity <0-100>       Text background opacity
+  --simulator                       iOS: build for Simulator (default for ios)
+  --device-build                    iOS: build for a physical device (--no-codesign)
+  --codesign                        iOS: allow codesigning (needs Xcode team)
+  --install                         After Android APK build, adb install -r
+  --open                            Reveal output folder when done
+  --clean                           flutter clean before building
+  --quiet                           Less chatter
+  -h, --help                        Show help
+
+${C_BOLD}OUTPUT${C_RESET}
+  Android APK   $OUT/collectemoi[-<version>]-<mode>.apk
+  iOS (sim)     $OUT/ios-simulator/  (Runner.app)
+  iOS (device)  $OUT/ios-device/     (Runner.app, unsigned by default)
+
+${C_BOLD}EXAMPLES${C_RESET}
+  $b apk --install
+  $b build android --server https://192.168.1.10:8080 --install
+  $b apk --icon ./icon.png --icon-text DEMO
+  $b ios --simulator
+  $b run --android
+  $b emulators --launch Medium_Phone_API_36.1
+  $b devices
+EOF
+}
+
+# ─── helpers ────────────────────────────────────────────────────────────────
+
+require_flutter() {
+  if ! command -v flutter >/dev/null 2>&1; then
+    err "flutter not found — export PATH=\"/opt/homebrew/share/flutter/bin:\$PATH\""
+    exit 1
+  fi
+}
+
+require_app() {
+  [[ -d "$APP" ]] || { err "missing Flutter app at $APP"; exit 1; }
+  [[ -f "$APP/pubspec.yaml" ]] || { err "missing $APP/pubspec.yaml"; exit 1; }
+}
+
+ensure_out() {
+  mkdir -p "$OUT"
+}
+
+dart_defines() {
+  local args=()
+  if [[ -n "$SERVER_URL" ]]; then
+    args+=(--dart-define="COLLECTEMOI_SERVER_URL=${SERVER_URL}")
+  fi
+  if [[ ${#args[@]} -gt 0 ]]; then
+    printf '%s\n' "${args[@]}"
+  fi
+}
+
+# Derive an integer build number from a marketing version (1.0.1 → 10001).
+derive_build_number() {
+  local v="${1:-}"
+  python3 - "$v" <<'PY'
+import re, sys
+v = sys.argv[1] or "0.0.1"
+parts = [int(x) for x in re.findall(r"\d+", v)[:3]]
+while len(parts) < 3:
+    parts.append(0)
+maj, minor, patch = parts
+n = maj * 10000 + minor * 100 + patch
+print(n if n > 0 else 1)
+PY
+}
+
+resolve_app_version_flags() {
+  # Prefer explicit APP_VERSION; else leave empty so Flutter uses pubspec.
+  if [[ -z "$APP_VERSION" && -n "$TENANT_DIR" && -f "$TENANT_DIR/../versions.json" ]]; then
+    # No auto from index — caller must pass --app-version from admin.
+    :
+  fi
+  if [[ -n "$APP_VERSION" && -z "$BUILD_NUMBER" ]]; then
+    BUILD_NUMBER="$(derive_build_number "$APP_VERSION")"
+  fi
+}
+
+flutter_version_args() {
+  resolve_app_version_flags
+  local args=()
+  if [[ -n "$APP_VERSION" ]]; then
+    args+=(--build-name="$APP_VERSION")
+  fi
+  if [[ -n "$BUILD_NUMBER" ]]; then
+    args+=(--build-number="$BUILD_NUMBER")
+  fi
+  if [[ ${#args[@]} -gt 0 ]]; then
+    printf '%s\n' "${args[@]}"
+  fi
+}
+
+artefact_basename() {
+  # collectemoi[-<version>]-<mode>.apk  or  collectemoi-ios-<kind>[-<version>].ipa
+  local kind="$1"   # apk | ios-simulator | ios-device
+  local ver=""
+  if [[ -n "$APP_VERSION" ]]; then
+    ver="-$(printf '%s' "$APP_VERSION" | tr '/ ' '__')"
+  fi
+  case "$kind" in
+    apk) printf 'collectemoi%s-%s.apk' "$ver" "$MODE" ;;
+    ios-simulator) printf 'collectemoi-ios-simulator%s' "$ver" ;;
+    ios-device) printf 'collectemoi-ios-device%s' "$ver" ;;
+    *) printf 'collectemoi%s' "$ver" ;;
+  esac
+}
+
+mode_flag() {
+  case "$MODE" in
+    debug) echo "--debug" ;;
+    profile) echo "--profile" ;;
+    release) echo "--release" ;;
+    *) err "unknown mode: $MODE"; exit 1 ;;
+  esac
+}
+
+flutter_pub_get() {
+  info "flutter pub get"
+  (cd "$APP" && flutter pub get)
+}
+
+# Sync admin branding into the Flutter tenant bundle + native labels/icons.
+apply_branding() {
+  local dest="$APP/tenant/default"
+  mkdir -p "$dest/assets"
+
+  if [[ -n "$TENANT_DIR" && -d "$TENANT_DIR" ]]; then
+    info "branding from $TENANT_DIR"
+    [[ -f "$TENANT_DIR/tenant.json" ]] && cp -f "$TENANT_DIR/tenant.json" "$dest/tenant.json"
+    [[ -f "$TENANT_DIR/theme.json" ]] && cp -f "$TENANT_DIR/theme.json" "$dest/theme.json"
+    if [[ -z "$LOGO_PATH" ]]; then
+      for cand in logo.png logo.jpg logo.webp; do
+        if [[ -f "$TENANT_DIR/assets/$cand" ]]; then LOGO_PATH="$TENANT_DIR/assets/$cand"; break; fi
+      done
+    fi
+    if [[ -z "$ICON_PATH" ]]; then
+      for cand in icon.png icon-1024.png icon.jpg icon.webp; do
+        if [[ -f "$TENANT_DIR/assets/$cand" ]]; then ICON_PATH="$TENANT_DIR/assets/$cand"; break; fi
+      done
+    fi
+    if [[ -z "$DISPLAY_NAME" && -f "$dest/tenant.json" ]]; then
+      DISPLAY_NAME="$(python3 -c "import json;print(json.load(open('$dest/tenant.json')).get('display_name',''))" 2>/dev/null || true)"
+    fi
+    if [[ -z "$SERVER_URL" && -f "$dest/tenant.json" ]]; then
+      SERVER_URL="$(python3 -c "import json;print(json.load(open('$dest/tenant.json')).get('server_base_url',''))" 2>/dev/null || true)"
+    fi
+  fi
+
+  if [[ -n "$DISPLAY_NAME" ]]; then
+    python3 - "$dest/tenant.json" "$DISPLAY_NAME" <<'PY' 2>/dev/null || true
+import json, sys
+path, name = sys.argv[1], sys.argv[2]
+try:
+    data = json.load(open(path))
+except Exception:
+    data = {"id": "default", "enabled_collectors": ["android_bugreport","ios_sysdiagnose","message_report"]}
+data["display_name"] = name
+json.dump(data, open(path, "w"), indent=2)
+open(path, "a").write("\n")
+PY
+    # Android launcher label
+    local am="$APP/android/app/src/main/AndroidManifest.xml"
+    if [[ -f "$am" ]]; then
+      python3 - "$am" "$DISPLAY_NAME" <<'PY'
+import re, sys
+path, name = sys.argv[1], sys.argv[2]
+text = open(path).read()
+text2 = re.sub(r'android:label="[^"]*"', f'android:label="{name}"', text, count=1)
+open(path, "w").write(text2)
+PY
+    fi
+    # iOS display name
+    local plist="$APP/ios/Runner/Info.plist"
+    if [[ -f "$plist" ]]; then
+      /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $DISPLAY_NAME" "$plist" 2>/dev/null \
+        || plutil -replace CFBundleDisplayName -string "$DISPLAY_NAME" "$plist" 2>/dev/null \
+        || true
+    fi
+    ok "display name  $DISPLAY_NAME"
+  fi
+
+  if [[ -n "$LOGO_PATH" && -f "$LOGO_PATH" ]]; then
+    local ext="${LOGO_PATH##*.}"
+    ext="$(printf '%s' "$ext" | tr '[:upper:]' '[:lower:]')"
+    [[ "$ext" == "jpeg" ]] && ext="jpg"
+    rm -f "$dest/assets"/logo.*
+    cp -f "$LOGO_PATH" "$dest/assets/logo.$ext"
+    # Prefer png name for Flutter asset declaration
+    if [[ "$ext" != "png" ]] && command -v sips >/dev/null 2>&1; then
+      sips -s format png "$dest/assets/logo.$ext" --out "$dest/assets/logo.png" >/dev/null 2>&1 || true
+    elif [[ "$ext" != "png" ]]; then
+      cp -f "$dest/assets/logo.$ext" "$dest/assets/logo.png"
+    fi
+    ok "logo  $dest/assets/logo.png"
+  fi
+
+  if [[ -n "$ICON_TEXT" || "$ICON_SCALE" != "100" || "$ICON_ROTATION" != "0" ]]; then
+    [[ "${#ICON_TEXT}" -le 24 ]] || { err "--icon-text accepts at most 24 characters"; exit 1; }
+    if ! command -v swift >/dev/null 2>&1; then
+      err "launcher image edits require Swift and AppKit (macOS)"
+      exit 1
+    fi
+    local icon_source="$ICON_PATH"
+    if [[ -z "$icon_source" ]]; then
+      icon_source="$APP/web/icons/Icon-512.png"
+    fi
+    [[ -f "$icon_source" ]] || { err "launcher icon not found: $icon_source"; exit 1; }
+    local overlay_dir
+    overlay_dir="$(mktemp -d "${TMPDIR:-/tmp}/cm-icon-text.XXXXXX")"
+    swift "$ROOT/scripts/overlay-icon-text.swift" \
+      "$icon_source" "$ICON_TEXT" "$overlay_dir/icon.png" \
+      "$ICON_FONT" "$ICON_SIZE" "$ICON_X" "$ICON_Y" "$ICON_COLOR" \
+      "$ICON_BADGE" "$ICON_BADGE_COLOR" "$ICON_BADGE_OPACITY" \
+      "$ICON_SCALE" "$ICON_ROTATION"
+    apply_launcher_icon "$overlay_dir/icon.png"
+    rm -rf "$overlay_dir"
+  elif [[ -n "$ICON_PATH" && -f "$ICON_PATH" ]]; then
+    apply_launcher_icon "$ICON_PATH"
+  elif [[ -f "$APP/web/icons/Icon-512.png" ]]; then
+    # Reset a prior generated text treatment when building without an uploaded icon.
+    apply_launcher_icon "$APP/web/icons/Icon-512.png"
+  fi
+}
+
+apply_launcher_icon() {
+  local src="$1"
+  info "launcher icon from $src"
+  if ! command -v sips >/dev/null 2>&1; then
+    warn "sips missing — skip launcher icon resize"
+    return 0
+  fi
+  local tmp
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/cm-icon.XXXXXX")"
+  # Android mipmap sizes
+  local -a sizes=(48 72 96 144 192)
+  local -a folders=(mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi)
+  local i
+  for i in "${!sizes[@]}"; do
+    local out="$APP/android/app/src/main/res/${folders[$i]}/ic_launcher.png"
+    mkdir -p "$(dirname "$out")"
+    sips -z "${sizes[$i]}" "${sizes[$i]}" "$src" --out "$out" >/dev/null 2>&1 || true
+  done
+  # iOS AppIcon — write a few common sizes into Assets if present
+  local ios_icon_dir="$APP/ios/Runner/Assets.xcassets/AppIcon.appiconset"
+  if [[ -d "$ios_icon_dir" ]]; then
+    sips -z 1024 1024 "$src" --out "$tmp/AppIcon-1024.png" >/dev/null 2>&1 || true
+    if [[ -f "$tmp/AppIcon-1024.png" ]]; then
+      # Replace any existing pngs with resized copies where filenames match common patterns
+      local f
+      for f in "$ios_icon_dir"/*.png; do
+        [[ -f "$f" ]] || continue
+        local base
+        base="$(basename "$f")"
+        # Heuristic sizes from filename
+        local sz=180
+        case "$base" in
+          *1024*) sz=1024 ;;
+          *180*|*60x60@3x*) sz=180 ;;
+          *120*|*60x60@2x*|*40x40@3x*) sz=120 ;;
+          *87*|*29x29@3x*) sz=87 ;;
+          *80*|*40x40@2x*) sz=80 ;;
+          *58*|*29x29@2x*) sz=58 ;;
+          *60*) sz=60 ;;
+          *40*) sz=40 ;;
+          *29*) sz=29 ;;
+          *20*) sz=20 ;;
+        esac
+        sips -z "$sz" "$sz" "$tmp/AppIcon-1024.png" --out "$f" >/dev/null 2>&1 || true
+      done
+      cp -f "$tmp/AppIcon-1024.png" "$ios_icon_dir/Icon-App-1024x1024@1x.png" 2>/dev/null || true
+    fi
+  fi
+  rm -rf "$tmp"
+  ok "launcher icons updated"
+}
+
+maybe_clean() {
+  if [[ "$CLEAN" -eq 1 ]]; then
+    info "flutter clean"
+    (cd "$APP" && flutter clean)
+  fi
+}
+
+copy_apk() {
+  local src="$1" dest="$2"
+  ensure_out
+  cp -f "$src" "$dest"
+  ok "APK  $dest  ($(du -h "$dest" | awk '{print $1}'))"
+  publish_build "$dest"
+}
+
+app_version() {
+  # Prefer branding --app-version, then pubspec: version: 0.1.0+1
+  if [[ -n "$APP_VERSION" ]]; then
+    if [[ -n "$BUILD_NUMBER" ]]; then
+      printf '%s+%s' "$APP_VERSION" "$BUILD_NUMBER"
+    else
+      printf '%s' "$APP_VERSION"
+    fi
+    return 0
+  fi
+  local v=""
+  if [[ -f "$APP/pubspec.yaml" ]]; then
+    v="$(awk '/^version:/{print $2; exit}' "$APP/pubspec.yaml" 2>/dev/null || true)"
+  fi
+  printf '%s' "${v:-unknown}"
+}
+
+write_build_meta() {
+  local src="$1"
+  [[ -f "$src" ]] || return 0
+  local name size mtime sha version platform lower
+  name="$(basename "$src")"
+  size="$(wc -c <"$src" | tr -d ' ')"
+  mtime="$(python3 -c "import os,sys; print(int(os.path.getmtime(sys.argv[1])))" "$src" 2>/dev/null || echo 0)"
+  if command -v shasum >/dev/null 2>&1; then
+    sha="$(shasum -a 256 "$src" | awk '{print $1}')"
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha="$(sha256sum "$src" | awk '{print $1}')"
+  else
+    sha="$(python3 -c "import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$src")"
+  fi
+  version="$(app_version)"
+  lower="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$lower" == *.apk ]]; then
+    platform="android"
+  elif [[ "$lower" == *.ipa || "$lower" == *ios* ]]; then
+    platform="ios"
+  else
+    platform="other"
+  fi
+  python3 - "$src.meta.json" "$name" "$version" "$sha" "$size" "$mtime" "$platform" <<'PY'
+import json, sys
+out, name, version, sha, size, mtime, platform = sys.argv[1:8]
+meta = {
+  "name": name,
+  "version": version,
+  "sha256": sha,
+  "size": int(size),
+  "mtime_secs": int(mtime),
+  "platform": platform,
+}
+with open(out, "w", encoding="utf-8") as f:
+  json.dump(meta, f, indent=2)
+  f.write("\n")
+PY
+}
+
+publish_build() {
+  local src="$1"
+  [[ -f "$src" ]] || return 0
+  write_build_meta "$src"
+  mkdir -p "$PUBLISH"
+  cp -f "$src" "$PUBLISH/"
+  [[ -f "$src.meta.json" ]] && cp -f "$src.meta.json" "$PUBLISH/"
+  ok "admin  $PUBLISH/$(basename "$src")"
+  info "version $(app_version)  sha256 $(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('sha256','')[:16])" "$src.meta.json" 2>/dev/null || echo "?")…"
+}
+
+# Zip Runner.app + build a Payload/ IPA for admin download.
+package_ios_downloads() {
+  local app_src="$1" kind="$2"   # kind: simulator|device
+  ensure_out
+  command -v zip >/dev/null 2>&1 || { warn "zip missing — skip IPA/zip packaging"; return 0; }
+  resolve_app_version_flags
+
+  local stem
+  stem="$(artefact_basename "ios-${kind}")"
+  local zip_name="${stem}.zip"
+  local ipa_name="${stem}.ipa"
+  local stage
+  stage="$(mktemp -d "${TMPDIR:-/tmp}/collectemoi-ios.XXXXXX")"
+
+  (cd "$(dirname "$app_src")" && zip -qry "$OUT/$zip_name" "$(basename "$app_src")")
+  ok "iOS zip  $OUT/$zip_name  ($(du -h "$OUT/$zip_name" | awk '{print $1}'))"
+  publish_build "$OUT/$zip_name"
+
+  mkdir -p "$stage/Payload"
+  cp -R "$app_src" "$stage/Payload/"
+  (cd "$stage" && zip -qry "$OUT/$ipa_name" Payload)
+  ok "iOS IPA  $OUT/$ipa_name  ($(du -h "$OUT/$ipa_name" | awk '{print $1}'))"
+  publish_build "$OUT/$ipa_name"
+  rm -rf "$stage"
+}
+
+# ─── commands ───────────────────────────────────────────────────────────────
+
+cmd_version() {
+  require_flutter
+  echo "collectemoi-app $CTL_VERSION"
+  flutter --version 2>&1 | head -3
+}
+
+cmd_doctor() {
+  require_flutter
+  hdr "Mobile toolchain"
+  kv "flutter" "$(command -v flutter)"
+  kv "app" "$APP"
+  kv "out" "$OUT"
+  kv "admin" "$PUBLISH"
+  if command -v adb >/dev/null 2>&1; then
+    kv "adb" "$(command -v adb)"
+  else
+    kv "adb" "missing"
+  fi
+  if command -v xcodebuild >/dev/null 2>&1; then
+    kv "xcode" "$(xcodebuild -version 2>/dev/null | head -1)"
+  else
+    kv "xcode" "missing"
+  fi
+  printf '\n'
+  flutter doctor -v 2>&1 | sed -n '1,80p'
+}
+
+cmd_devices() {
+  require_flutter
+  hdr "Flutter devices"
+  flutter devices
+}
+
+cmd_emulators() {
+  require_flutter
+  local launch=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --launch) launch="$2"; shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      *) err "unknown emulators option: $1"; exit 1 ;;
+    esac
+  done
+  if [[ -n "$launch" ]]; then
+    hdr "Launch emulator"
+    info "flutter emulators --launch $launch"
+    flutter emulators --launch "$launch"
+    ok "launch requested — wait a few seconds, then: $(basename "$0") devices"
+    return 0
+  fi
+  hdr "Flutter emulators"
+  flutter emulators
+  printf '\n%sTip:%s  %s emulators --launch <id>\n' "$C_DIM" "$C_RESET" "$(basename "$0")"
+}
+
+cmd_clean() {
+  require_flutter
+  require_app
+  hdr "Clean"
+  (cd "$APP" && flutter clean)
+  rm -rf "$OUT"
+  ok "cleaned Flutter build + $OUT"
+}
+
+cmd_open() {
+  ensure_out
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    open "$OUT"
+  else
+    info "output directory: $OUT"
+  fi
+}
+
+cmd_install() {
+  require_app
+  local apk=""
+  if [[ -f "$OUT/collectemoi-${MODE}.apk" ]]; then
+    apk="$OUT/collectemoi-${MODE}.apk"
+  else
+    apk="$(ls -t "$OUT"/collectemoi-*.apk 2>/dev/null | head -1 || true)"
+  fi
+  if [[ -z "$apk" || ! -f "$apk" ]]; then
+    err "no APK in $OUT — run: $(basename "$0") apk"
+    exit 1
+  fi
+  if ! command -v adb >/dev/null 2>&1; then
+    err "adb not found"
+    exit 1
+  fi
+  hdr "Install APK"
+  kv "apk" "$apk"
+  adb devices
+  info "adb install -r …"
+  adb install -r "$apk"
+  ok "installed $apk"
+}
+
+build_android() {
+  require_flutter
+  require_app
+  maybe_clean
+  apply_branding
+  flutter_pub_get
+  ensure_out
+
+  hdr "Android APK ($MODE)"
+  resolve_app_version_flags
+  local args=(build apk "$(mode_flag)")
+  # shellcheck disable=SC2207
+  local defs=($(dart_defines))
+  if [[ ${#defs[@]} -gt 0 ]]; then
+    args+=("${defs[@]}")
+    info "server  $SERVER_URL"
+  fi
+  # shellcheck disable=SC2207
+  local ver_args=($(flutter_version_args))
+  if [[ ${#ver_args[@]} -gt 0 ]]; then
+    args+=("${ver_args[@]}")
+    info "app version  $(app_version)"
+  fi
+
+  info "flutter ${args[*]}"
+  (cd "$APP" && flutter "${args[@]}")
+
+  local built=""
+  case "$MODE" in
+    debug) built="$APP/build/app/outputs/flutter-apk/app-debug.apk" ;;
+    profile) built="$APP/build/app/outputs/flutter-apk/app-profile.apk" ;;
+    release) built="$APP/build/app/outputs/flutter-apk/app-release.apk" ;;
+  esac
+  if [[ ! -f "$built" ]]; then
+    # Fallback: newest apk under outputs
+    built="$(ls -t "$APP"/build/app/outputs/flutter-apk/*.apk 2>/dev/null | head -1 || true)"
+  fi
+  [[ -n "$built" && -f "$built" ]] || { err "APK not found after build"; exit 1; }
+
+  local dest="$OUT/$(artefact_basename apk)"
+  copy_apk "$built" "$dest"
+  # Also keep a stable latest alias for install
+  cp -f "$dest" "$OUT/collectemoi-latest.apk"
+  publish_build "$OUT/collectemoi-latest.apk"
+
+  if [[ "$INSTALL" -eq 1 ]]; then
+    cmd_install
+  else
+    info "install later:  $(basename "$0") install"
+    info "or:             adb install -r \"$dest\""
+  fi
+}
+
+build_ios() {
+  require_flutter
+  require_app
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    err "iOS builds require macOS + Xcode"
+    exit 1
+  fi
+  maybe_clean
+  apply_branding
+  flutter_pub_get
+  ensure_out
+
+  local args=()
+  resolve_app_version_flags
+  # shellcheck disable=SC2207
+  local defs=($(dart_defines))
+  # shellcheck disable=SC2207
+  local ver_args=($(flutter_version_args))
+
+  if [[ "$SIMULATOR" -eq 1 ]]; then
+    hdr "iOS Simulator ($MODE)"
+    args=(build ios --simulator "$(mode_flag)")
+    if [[ ${#defs[@]} -gt 0 ]]; then
+      args+=("${defs[@]}")
+      info "server  $SERVER_URL"
+    fi
+    if [[ ${#ver_args[@]} -gt 0 ]]; then
+      args+=("${ver_args[@]}")
+      info "app version  $(app_version)"
+    fi
+    info "flutter ${args[*]}"
+    (cd "$APP" && flutter "${args[@]}")
+
+    local app_src
+    app_src="$(find "$APP/build/ios/iphonesimulator" -maxdepth 2 -name 'Runner.app' -type d 2>/dev/null | head -1 || true)"
+    [[ -n "$app_src" ]] || { err "Runner.app not found under build/ios/iphonesimulator"; exit 1; }
+
+    local dest_dir="$OUT/ios-simulator"
+    rm -rf "$dest_dir"
+    mkdir -p "$dest_dir"
+    cp -R "$app_src" "$dest_dir/"
+    ok "iOS Simulator app  $dest_dir/Runner.app"
+    package_ios_downloads "$dest_dir/Runner.app" "simulator"
+    info "boot a simulator, then:  xcrun simctl install booted \"$dest_dir/Runner.app\""
+    info "or:  $(basename "$0") run --ios"
+  else
+    hdr "iOS device build ($MODE)"
+    args=(build ios "$(mode_flag)")
+    if [[ "$NO_CODESIGN" -eq 1 ]]; then
+      args+=(--no-codesign)
+      warn "building without codesign — open Xcode to sign for a physical device"
+    fi
+    if [[ ${#defs[@]} -gt 0 ]]; then
+      args+=("${defs[@]}")
+      info "server  $SERVER_URL"
+    fi
+    if [[ ${#ver_args[@]} -gt 0 ]]; then
+      args+=("${ver_args[@]}")
+      info "app version  $(app_version)"
+    fi
+    info "flutter ${args[*]}"
+    (cd "$APP" && flutter "${args[@]}")
+
+    local app_src
+    app_src="$(find "$APP/build/ios/iphoneos" -maxdepth 2 -name 'Runner.app' -type d 2>/dev/null | head -1 || true)"
+    if [[ -z "$app_src" ]]; then
+      # Debug builds sometimes land under Debug-iphoneos
+      app_src="$(find "$APP/build/ios" -path '*/iphoneos/Runner.app' -type d 2>/dev/null | head -1 || true)"
+    fi
+    [[ -n "$app_src" ]] || { err "Runner.app not found under build/ios"; exit 1; }
+
+    local dest_dir="$OUT/ios-device"
+    rm -rf "$dest_dir"
+    mkdir -p "$dest_dir"
+    cp -R "$app_src" "$dest_dir/"
+    ok "iOS device app  $dest_dir/Runner.app"
+    package_ios_downloads "$dest_dir/Runner.app" "device"
+    info "open in Xcode:  open \"$APP/ios/Runner.xcworkspace\""
+  fi
+}
+
+cmd_build() {
+  local target="${1:-${PLATFORM:-all}}"
+  case "$target" in
+    android|apk) build_android ;;
+    ios) build_ios ;;
+    all|"")
+      build_android
+      if [[ "$(uname -s)" == "Darwin" ]]; then
+        build_ios
+      else
+        warn "skipping iOS (not macOS)"
+      fi
+      ;;
+    *) err "unknown build target: $target (android|ios|all)"; exit 1 ;;
+  esac
+  if [[ "$OPEN" -eq 1 ]]; then
+    cmd_open
+  else
+    info "artefacts in  $OUT"
+  fi
+}
+
+pick_device() {
+  # Prefer an explicit --device, else first matching mobile device.
+  if [[ -n "$DEVICE" ]]; then
+    echo "$DEVICE"
+    return 0
+  fi
+  local want="$1" # android|ios|any
+  local line id platform
+  while IFS= read -r line; do
+    [[ "$line" == *"•"* ]] || continue
+    [[ "$line" == *"offline"* ]] && continue
+    id="$(echo "$line" | awk -F'•' '{print $2}' | xargs)"
+    platform="$(echo "$line" | awk -F'•' '{print $3}' | xargs)"
+    [[ -n "$id" ]] || continue
+    case "$want" in
+      android) [[ "$platform" == *android* ]] || continue ;;
+      ios) [[ "$platform" == *ios* ]] || continue ;;
+      any)
+        [[ "$platform" == *android* || "$platform" == *ios* ]] || continue
+        ;;
+    esac
+    echo "$id"
+    return 0
+  done < <(flutter devices 2>/dev/null || true)
+  return 1
+}
+
+cmd_run() {
+  require_flutter
+  require_app
+  flutter_pub_get
+
+  local want="any"
+  case "$PLATFORM" in
+    android) want="android" ;;
+    ios) want="ios" ;;
+  esac
+
+  hdr "Run on device"
+  local id=""
+  if ! id="$(pick_device "$want")"; then
+    warn "no matching device — listing emulators"
+    flutter emulators || true
+    err "connect a phone, or: $(basename "$0") emulators --launch <id>"
+    exit 1
+  fi
+  kv "device" "$id"
+
+  local args=(run -d "$id")
+  args+=("$(mode_flag)")
+  # shellcheck disable=SC2207
+  local defs=($(dart_defines))
+  if [[ ${#defs[@]} -gt 0 ]]; then
+    args+=("${defs[@]}")
+    info "server  $SERVER_URL"
+  fi
+  info "flutter ${args[*]}"
+  (cd "$APP" && flutter "${args[@]}")
+}
+
+# ─── option parsing ─────────────────────────────────────────────────────────
+
+parse_opts() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --debug) MODE="debug"; shift ;;
+      --profile) MODE="profile"; shift ;;
+      --release) MODE="release"; shift ;;
+      --android) PLATFORM="android"; shift ;;
+      --ios) PLATFORM="ios"; shift ;;
+      --all) PLATFORM="all"; shift ;;
+      --device) DEVICE="$2"; shift 2 ;;
+      --server) SERVER_URL="$2"; shift 2 ;;
+      --tenant-dir) TENANT_DIR="$2"; shift 2 ;;
+      --display-name) DISPLAY_NAME="$2"; shift 2 ;;
+      --app-version) APP_VERSION="$2"; shift 2 ;;
+      --build-number) BUILD_NUMBER="$2"; shift 2 ;;
+      --logo) LOGO_PATH="$2"; shift 2 ;;
+      --icon) ICON_PATH="$2"; shift 2 ;;
+      --icon-text) ICON_TEXT="$2"; shift 2 ;;
+      --icon-font) ICON_FONT="$2"; shift 2 ;;
+      --icon-size) ICON_SIZE="$2"; shift 2 ;;
+      --icon-x) ICON_X="$2"; shift 2 ;;
+      --icon-y) ICON_Y="$2"; shift 2 ;;
+      --icon-scale) ICON_SCALE="$2"; shift 2 ;;
+      --icon-rotation) ICON_ROTATION="$2"; shift 2 ;;
+      --icon-color) ICON_COLOR="$2"; shift 2 ;;
+      --icon-badge) ICON_BADGE="$2"; shift 2 ;;
+      --icon-badge-color) ICON_BADGE_COLOR="$2"; shift 2 ;;
+      --icon-badge-opacity) ICON_BADGE_OPACITY="$2"; shift 2 ;;
+      --simulator) SIMULATOR=1; shift ;;
+      --device-build) SIMULATOR=0; shift ;;
+      --codesign) NO_CODESIGN=0; shift ;;
+      --no-codesign) NO_CODESIGN=1; shift ;;
+      --install) INSTALL=1; shift ;;
+      --open) OPEN=1; shift ;;
+      --clean) CLEAN=1; shift ;;
+      --quiet|-q) QUIET=1; shift ;;
+      -h|--help) usage; exit 0 ;;
+      *)
+        # Leave unknown tokens for subcommands that parse their own flags.
+        REMAINING+=("$1")
+        shift
+        ;;
+    esac
+  done
+}
+
+main() {
+  local cmd="${1:-}"
+  shift || true
+  REMAINING=()
+  parse_opts "$@"
+  set -- "${REMAINING[@]+"${REMAINING[@]}"}"
+
+  case "$cmd" in
+    build)
+      local target="${1:-}"
+      if [[ -n "$target" && "$target" != -* ]]; then
+        shift || true
+        parse_opts "$@"
+        cmd_build "$target"
+      else
+        parse_opts "$@"
+        cmd_build "${PLATFORM:-all}"
+      fi
+      ;;
+    apk|android)
+      PLATFORM="android"
+      parse_opts "$@"
+      cmd_build android
+      ;;
+    ios)
+      PLATFORM="ios"
+      SIMULATOR=1
+      parse_opts "$@"
+      # allow overriding with --device-build after
+      cmd_build ios
+      ;;
+    run)
+      parse_opts "$@"
+      cmd_run
+      ;;
+    install)
+      parse_opts "$@"
+      cmd_install
+      ;;
+    devices)
+      cmd_devices
+      ;;
+    emulators)
+      cmd_emulators "$@"
+      ;;
+    doctor)
+      cmd_doctor
+      ;;
+    clean)
+      cmd_clean
+      ;;
+    open)
+      cmd_open
+      ;;
+    version|--version|-V)
+      cmd_version
+      ;;
+    -h|--help|help|"")
+      usage
+      [[ -n "$cmd" ]] || exit 1
+      ;;
+    *)
+      err "unknown command: $cmd"
+      usage
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

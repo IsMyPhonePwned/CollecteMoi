@@ -1,0 +1,1495 @@
+#!/usr/bin/env bash
+# CollecteMoi control plane — start/stop/status/logs/backup for API + worker.
+# Configuration is CLI flags only (no env-file required).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CTL_VERSION="0.2.2"
+RUN_DIR="$ROOT/data/run"
+DATA_DIR="$ROOT/data"
+API_PID="$RUN_DIR/api.pid"
+WORKER_PID="$RUN_DIR/worker.pid"
+API_LOG="$RUN_DIR/api.log"
+WORKER_LOG="$RUN_DIR/worker.log"
+
+# Defaults (overridable via flags after the subcommand)
+BIND="127.0.0.1:8080"
+PUBLIC_URL="https://127.0.0.1:8080"
+LAB_SEAL="true"
+TLS="true"
+TLS_CERT=""
+TLS_KEY=""
+HTTP_BIND="off"
+POLL_SECS="2"
+EXTRA_API_ARGS=()
+EXTRA_WORKER_ARGS=()
+JSON_OUT=0
+QUIET=0
+
+# ─── presentation ───────────────────────────────────────────────────────────
+
+_use_color() {
+  [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]] && [[ "${TERM:-}" != "dumb" ]]
+}
+
+if _use_color; then
+  C_RESET=$'\033[0m'
+  C_DIM=$'\033[2m'
+  C_BOLD=$'\033[1m'
+  C_RED=$'\033[31m'
+  C_GREEN=$'\033[32m'
+  C_YELLOW=$'\033[33m'
+  C_CYAN=$'\033[36m'
+  C_BLUE=$'\033[34m'
+else
+  C_RESET=""; C_DIM=""; C_BOLD=""; C_RED=""; C_GREEN=""; C_YELLOW=""; C_CYAN=""; C_BLUE=""
+fi
+
+ok()   { printf '%s✓%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
+warn() { printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
+err()  { printf '%s✗%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; }
+info() { [[ "$QUIET" -eq 1 ]] || printf '%s·%s %s\n' "$C_CYAN" "$C_RESET" "$*"; }
+hdr()  {
+  local title="$1"
+  printf '\n%s%s%s\n' "$C_BOLD" "$title" "$C_RESET"
+  printf '%s%s%s\n' "$C_DIM" "$(printf '─%.0s' {1..56})" "$C_RESET"
+}
+kv() {
+  # kv KEY VALUE [hint]
+  local key="$1" val="$2" hint="${3:-}"
+  printf '  %-14s %s' "$key" "$val"
+  if [[ -n "$hint" ]]; then
+    printf '  %s%s%s' "$C_DIM" "$hint" "$C_RESET"
+  fi
+  printf '\n'
+}
+badge() {
+  # badge running|stopped|ok|down|warn TEXT
+  case "$1" in
+    running|ok|up) printf '%s%s%s' "$C_GREEN" "$2" "$C_RESET" ;;
+    stopped|down)  printf '%s%s%s' "$C_RED" "$2" "$C_RESET" ;;
+    warn|degraded) printf '%s%s%s' "$C_YELLOW" "$2" "$C_RESET" ;;
+    *)             printf '%s' "$2" ;;
+  esac
+}
+
+human_bytes() {
+  python3 -c '
+import sys
+n=float(sys.argv[1])
+u=["B","KB","MB","GB","TB"]
+i=0
+while n>=1024 and i<len(u)-1:
+  n/=1024; i+=1
+print(f"{n:.0f} {u[i]}" if i==0 else f"{n:.1f} {u[i]}")
+' "$1" 2>/dev/null || echo "$1 B"
+}
+
+dir_size() {
+  local p="$1"
+  [[ -e "$p" ]] || { echo "0"; return; }
+  du -sk "$p" 2>/dev/null | awk '{print $1 * 1024}' || echo "0"
+}
+
+# ─── help ───────────────────────────────────────────────────────────────────
+
+usage() {
+  local b
+  b="$(basename "$0")"
+  cat <<EOF
+${C_BOLD}CollecteMoictl${C_RESET} ${C_DIM}v${CTL_VERSION}${C_RESET} — lab process control for API + worker
+
+${C_BOLD}USAGE${C_RESET}
+  $b <command> [options]
+
+${C_BOLD}COMMANDS${C_RESET}
+  start                 Build if needed, start API + worker, wait until healthy
+  stop                  Graceful stop (SIGTERM → SIGKILL)
+  restart               stop + start
+  status                Rich ops dashboard (processes, TLS, storage, catalogue)
+  health                Exit 0/1 health probe (use in scripts / CI)
+  doctor                Local diagnostics (binaries, ports, cert, DB, disk)
+  logs                  Tail process logs
+  version               ctl + binary versions
+  open                  Open admin console in the default browser
+  reset-password        Set a new admin password (local recovery; no old password needed)
+  export                Backup SQLite (+ optional keys/blobs) to a zip
+  import                Restore a backup zip (requires --force)
+  package               Build a portable Docker image archive
+  push <user@host>      Package and deploy a quick-test stack over SSH
+
+${C_BOLD}GLOBAL OPTIONS${C_RESET}
+  --json                Machine-readable output (status / health / version)
+  --quiet               Less chatter on start/stop
+  -h, --help            Show this help
+
+${C_BOLD}START / RESTART OPTIONS${C_RESET}
+  --data-dir <path>       Default: <repo>/data
+  --run-dir <path>        PID/log directory (default: <data-dir>/run)
+  --bind <addr>           Default: 127.0.0.1:8080
+  --public-url <url>      Default: https://127.0.0.1:8080
+  --lab-seal <true|false> Default: true
+  --tls <true|false>      HTTPS only by default (true; auto cert under data/tls/)
+  --tls-cert <pem>        Custom TLS certificate PEM
+  --tls-key <pem>         Custom TLS private key PEM
+  --http-bind <addr|off>  Optional plain HTTP companion (default: off)
+  --poll-secs <n>         Worker poll interval (default: 2)
+  --api-arg <flag>…       Extra flag passed to collectemoi-api (repeatable)
+  --worker-arg <flag>…    Extra flag passed to collectemoi-worker (repeatable)
+  --wait-secs <n>         Health wait after start (default: 8)
+
+${C_BOLD}LOGS OPTIONS${C_RESET}
+  --lines, -n <n>         Tail size (default: 80)
+  --source <api|worker|all>  Default: all
+  --follow, -f            Follow like tail -f
+  --errors                Show only WARN/ERROR lines
+
+${C_BOLD}ADMIN RECOVERY${C_RESET}
+  reset-password [--password <pw>] [--keep-mfa] [--force-setup] [--yes]
+      Host-local only (touches SQLite under --data-dir). Clears sessions,
+      disables TOTP / YubiKeys by default (recovery), and restarts the API
+      so login lockout state is cleared.
+      --force-setup  wipe admin account so /admin shows first-run setup
+      --keep-mfa     leave TOTP / security keys enabled (password only)
+      --yes          skip confirmation prompt
+
+${C_BOLD}BACKUP${C_RESET}
+  export [--out file.zip] [--keys] [--blobs]
+  import <file.zip> [--keys] [--blobs] [--force]
+      Uses live HTTPS admin API when up; otherwise offline zip I/O.
+
+${C_BOLD}DOCKER DEPLOY${C_RESET}
+  package [--platform linux/amd64|linux/arm64] [--tag image:tag] [--out file.tar.gz]
+  push <user@host> [--ssh-port n] [--port n] [--public-url https://host:port]
+       push replaces only collectemoi-test-api/worker and keeps their named data volume.
+       Requires Docker Buildx locally and Docker + SSH access on the VPS.
+
+${C_BOLD}EXAMPLES${C_RESET}
+  $b start
+  $b start --tls-cert ./fullchain.pem --tls-key ./privkey.pem
+  $b status
+  $b health && echo ready
+  $b logs -f --source api
+  $b doctor
+  $b reset-password
+  $b reset-password --password 'new-secret' --yes
+  $b reset-password --force-setup --yes
+  $b export --out ./backup.zip --keys
+  $b import ./backup.zip --force
+  $b package --platform linux/amd64
+  $b push deploy@example.com --public-url https://example.com:8080
+  $b open
+EOF
+}
+
+# ─── option parsing ─────────────────────────────────────────────────────────
+
+WAIT_SECS=8
+
+parse_opts() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --data-dir) DATA_DIR="$2"; RUN_DIR="$DATA_DIR/run"; shift 2 ;;
+      --run-dir) RUN_DIR="$2"; shift 2 ;;
+      --bind) BIND="$2"; shift 2 ;;
+      --public-url) PUBLIC_URL="$2"; shift 2 ;;
+      --lab-seal) LAB_SEAL="$2"; shift 2 ;;
+      --tls) TLS="$2"; shift 2 ;;
+      --tls-cert) TLS_CERT="$2"; shift 2 ;;
+      --tls-key) TLS_KEY="$2"; shift 2 ;;
+      --http-bind) HTTP_BIND="$2"; shift 2 ;;
+      --poll-secs) POLL_SECS="$2"; shift 2 ;;
+      --wait-secs) WAIT_SECS="$2"; shift 2 ;;
+      --api-arg) EXTRA_API_ARGS+=("$2"); shift 2 ;;
+      --worker-arg) EXTRA_WORKER_ARGS+=("$2"); shift 2 ;;
+      --json) JSON_OUT=1; shift ;;
+      --quiet|-q) QUIET=1; shift ;;
+      -h|--help) usage; exit 0 ;;
+      *) echo "unknown option: $1" >&2; usage; exit 1 ;;
+    esac
+  done
+  refresh_paths
+}
+
+refresh_paths() {
+  API_PID="$RUN_DIR/api.pid"
+  WORKER_PID="$RUN_DIR/worker.pid"
+  API_LOG="$RUN_DIR/api.log"
+  WORKER_LOG="$RUN_DIR/worker.log"
+}
+
+load_run_config() {
+  [[ -f "$RUN_DIR/config.json" ]] || return 0
+  local cfg="$RUN_DIR/config.json"
+  BIND="$(python3 -c "import json;print(json.load(open('$cfg')).get('bind','$BIND'))" 2>/dev/null || echo "$BIND")"
+  PUBLIC_URL="$(python3 -c "import json;print(json.load(open('$cfg')).get('public_url','$PUBLIC_URL'))" 2>/dev/null || echo "$PUBLIC_URL")"
+  DATA_DIR="$(python3 -c "import json;print(json.load(open('$cfg')).get('data_dir','$DATA_DIR'))" 2>/dev/null || echo "$DATA_DIR")"
+  TLS="$(python3 -c "import json;print(str(json.load(open('$cfg')).get('tls',True)).lower())" 2>/dev/null || echo "$TLS")"
+  HTTP_BIND="$(python3 -c "import json;print(json.load(open('$cfg')).get('http_bind','off'))" 2>/dev/null || echo "$HTTP_BIND")"
+  LAB_SEAL="$(python3 -c "import json;print(str(json.load(open('$cfg')).get('lab_seal',True)).lower())" 2>/dev/null || echo "$LAB_SEAL")"
+  POLL_SECS="$(python3 -c "import json;print(json.load(open('$cfg')).get('poll_secs',2))" 2>/dev/null || echo "$POLL_SECS")"
+  TLS_CERT="$(python3 -c "import json;print(json.load(open('$cfg')).get('tls_cert','') or '')" 2>/dev/null || echo "$TLS_CERT")"
+  TLS_KEY="$(python3 -c "import json;print(json.load(open('$cfg')).get('tls_key','') or '')" 2>/dev/null || echo "$TLS_KEY")"
+  refresh_paths
+}
+
+# ─── process helpers ────────────────────────────────────────────────────────
+
+is_running() {
+  local pid_file="$1"
+  [[ -f "$pid_file" ]] || return 1
+  local pid
+  pid="$(cat "$pid_file" 2>/dev/null || true)"
+  [[ -n "${pid:-}" ]] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
+
+pid_of() {
+  local pid_file="$1"
+  [[ -f "$pid_file" ]] || return 1
+  cat "$pid_file" 2>/dev/null
+}
+
+stop_one() {
+  local name="$1" pid_file="$2"
+  if ! is_running "$pid_file"; then
+    rm -f "$pid_file"
+    info "$name already stopped"
+    return 0
+  fi
+  local pid
+  pid="$(cat "$pid_file")"
+  kill "$pid" 2>/dev/null || true
+  for _ in $(seq 1 30); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      rm -f "$pid_file"
+      ok "$name stopped (pid $pid)"
+      return 0
+    fi
+    sleep 0.1
+  done
+  kill -9 "$pid" 2>/dev/null || true
+  rm -f "$pid_file"
+  warn "$name force-killed (pid $pid)"
+}
+
+ensure_built() {
+  # Always build into <repo>/target — ignore inherited CARGO_TARGET_DIR.
+  local need_build=0
+  if [[ ! -x "$ROOT/target/debug/collectemoi-api" ]] || [[ ! -x "$ROOT/target/debug/collectemoi-worker" ]]; then
+    need_build=1
+  elif [[ -n "$(find "$ROOT/crates" -type f \( -name '*.rs' -o -name 'Cargo.toml' -o -name '*.html' -o -name '*.css' -o -name '*.js' \) -newer "$ROOT/target/debug/collectemoi-api" 2>/dev/null | head -1)" ]]; then
+    # include_str! embeds static/admin.html — HTML changes must trigger a rebuild.
+    need_build=1
+  fi
+  if [[ "$need_build" -eq 1 ]]; then
+    info "building collectemoi-api + collectemoi-worker…"
+    local t0
+    t0="$(date +%s)"
+    (cd "$ROOT" && env -u CARGO_TARGET_DIR cargo build -p collectemoi-api -p collectemoi-worker)
+    ok "build finished in $(( $(date +%s) - t0 ))s"
+  else
+    info "binaries up to date"
+  fi
+}
+
+write_run_config() {
+  mkdir -p "$RUN_DIR"
+  python3 - \
+    "$RUN_DIR/config.json" \
+    "$DATA_DIR" "$RUN_DIR" "$BIND" "$PUBLIC_URL" "$LAB_SEAL" "$TLS" \
+    "$TLS_CERT" "$TLS_KEY" "$HTTP_BIND" "$POLL_SECS" "$CTL_VERSION" <<'PY'
+import json, sys, time
+out = sys.argv[1]
+(
+  data_dir, run_dir, bind, public_url, lab_seal, tls,
+  tls_cert, tls_key, http_bind, poll_secs, ctl_version
+) = sys.argv[2:13]
+cfg = {
+  "data_dir": data_dir,
+  "run_dir": run_dir,
+  "bind": bind,
+  "public_url": public_url,
+  "lab_seal": lab_seal == "true",
+  "tls": tls == "true",
+  "tls_cert": tls_cert,
+  "tls_key": tls_key,
+  "http_bind": http_bind,
+  "poll_secs": int(poll_secs),
+  "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+  "ctl_version": ctl_version,
+}
+with open(out, "w", encoding="utf-8") as f:
+  json.dump(cfg, f, indent=2)
+  f.write("\n")
+PY
+}
+
+proc_info() {
+  local pid="$1"
+  if ! kill -0 "$pid" 2>/dev/null; then
+    echo "dead"
+    return
+  fi
+  python3 - "$pid" <<'PY'
+import subprocess, sys
+pid = sys.argv[1]
+try:
+    out = subprocess.check_output(["ps", "-p", pid, "-o", "etime=,rss=,pcpu="], text=True).strip()
+except Exception:
+    print("running"); raise SystemExit
+parts = out.split()
+if len(parts) < 3:
+    print("running"); raise SystemExit
+etime, rss_kb, cpu = parts[0], parts[1], parts[2]
+try:
+    rss = int(rss_kb) * 1024
+except Exception:
+    rss = 0
+u = ["B","KB","MB","GB"]
+n = float(rss); i = 0
+while n >= 1024 and i < len(u)-1:
+    n /= 1024; i += 1
+rss_h = f"{n:.0f} {u[i]}" if i == 0 else f"{n:.1f} {u[i]}"
+print(f"up {etime}  rss {rss_h}  cpu {cpu}%")
+PY
+}
+
+spawn_detached() {
+  local pid_file="$1" log_file="$2"
+  shift 2
+  python3 - "$pid_file" "$log_file" "$@" <<'PY'
+import subprocess, sys
+pid_file, log_file, *cmd = sys.argv[1:]
+with open(log_file, "ab", buffering=0) as log:
+    proc = subprocess.Popen(
+        cmd,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+        close_fds=True,
+    )
+with open(pid_file, "w", encoding="utf-8") as f:
+    f.write(str(proc.pid))
+PY
+}
+
+probe_health() {
+  local url
+  for url in \
+    "${PUBLIC_URL}/healthz" \
+    "https://${BIND}/healthz" \
+    "http://${BIND}/healthz"
+  do
+    if curl -kfsS --max-time 2 "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+wait_healthy() {
+  local secs="${1:-$WAIT_SECS}"
+  local i
+  for i in $(seq 1 "$secs"); do
+    if ! is_running "$API_PID"; then
+      return 1
+    fi
+    if probe_health; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+fetch_status_json() {
+  local url
+  for url in \
+    "${PUBLIC_URL}/v1/status" \
+    "https://${BIND}/v1/status" \
+    "http://${BIND}/v1/status"
+  do
+    if body="$(curl -kfsS --max-time 2 "$url" 2>/dev/null)"; then
+      printf '%s' "$body"
+      return 0
+    fi
+  done
+  return 1
+}
+
+admin_api_base() {
+  if [[ -f "$RUN_DIR/config.json" ]]; then
+    python3 - "$RUN_DIR/config.json" <<'PY'
+import json,sys
+c=json.load(open(sys.argv[1]))
+url=(c.get("public_url") or "").rstrip("/")
+if url:
+    print(url); raise SystemExit
+hb=c.get("http_bind") or "off"
+print(f"http://{hb}" if hb and hb != "off" else "")
+PY
+  else
+    echo "https://127.0.0.1:8080"
+  fi
+}
+
+tls_cert_path() {
+  if [[ -n "$TLS_CERT" ]]; then
+    echo "$TLS_CERT"
+  else
+    echo "$DATA_DIR/tls/server.crt"
+  fi
+}
+
+# ─── commands ───────────────────────────────────────────────────────────────
+
+# macOS truncates `ps -o comm=` to ~16 chars ("collectem"); prefer full args.
+is_collectemoi_api_pid() {
+  local pid="$1" args="" cmd=""
+  [[ -n "$pid" ]] || return 1
+  args="$(ps -p "$pid" -o args= 2>/dev/null || ps -p "$pid" -o command= 2>/dev/null || true)"
+  if [[ "$args" == *collectemoi-api* ]]; then
+    return 0
+  fi
+  cmd="$(ps -p "$pid" -o comm= 2>/dev/null || true)"
+  # Truncated name on macOS / Activity Monitor style.
+  if [[ "$cmd" == collectem* || "$cmd" == *collectemoi-api* ]]; then
+    return 0
+  fi
+  # Last resort: open files / cwd mention our binary.
+  if lsof -p "$pid" 2>/dev/null | grep -q 'collectemoi-api'; then
+    return 0
+  fi
+  return 1
+}
+
+free_bind_port() {
+  local port="${BIND##*:}"
+  [[ -n "$port" ]] || return 0
+  local orphan tries=0
+  while true; do
+    orphan="$(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | head -1 || true)"
+    if [[ -z "$orphan" ]]; then
+      return 0
+    fi
+    if ! is_collectemoi_api_pid "$orphan"; then
+      err "port :$port is in use by pid $orphan (not collectemoi-api) — free it manually"
+      return 1
+    fi
+    warn "freeing :$port — stopping orphan api (pid $orphan)"
+    kill "$orphan" 2>/dev/null || true
+    sleep 0.25
+    if kill -0 "$orphan" 2>/dev/null; then
+      kill -9 "$orphan" 2>/dev/null || true
+      sleep 0.25
+    fi
+    tries=$((tries + 1))
+    if [[ "$tries" -ge 8 ]]; then
+      err "could not free :$port (still held by pid $orphan)"
+      err "from a normal terminal run: kill -9 $orphan && ./scripts/collectemoictl start"
+      return 1
+    fi
+  done
+}
+
+cmd_start() {
+  # Restore last-run defaults, then let CLI flags override.
+  load_run_config
+  parse_opts "$@"
+  mkdir -p "$RUN_DIR" "$DATA_DIR"
+  hdr "CollecteMoi start"
+  ensure_built
+  write_run_config
+
+  if is_running "$API_PID"; then
+    info "api already running (pid $(pid_of "$API_PID"))"
+  else
+    free_bind_port
+    set +u
+    local tls_args=(--tls "$TLS" --http-bind "$HTTP_BIND")
+    if [[ -n "$TLS_CERT" ]]; then tls_args+=(--tls-cert "$TLS_CERT"); fi
+    if [[ -n "$TLS_KEY" ]]; then tls_args+=(--tls-key "$TLS_KEY"); fi
+    : >"$API_LOG"
+    spawn_detached "$API_PID" "$API_LOG" \
+      "$ROOT/target/debug/collectemoi-api" \
+      --data-dir "$DATA_DIR" \
+      --bind "$BIND" \
+      --public-url "$PUBLIC_URL" \
+      --lab-seal "$LAB_SEAL" \
+      "${tls_args[@]}" \
+      "${EXTRA_API_ARGS[@]}"
+    set -u
+    ok "api started (pid $(pid_of "$API_PID"))"
+  fi
+
+  if is_running "$WORKER_PID"; then
+    info "worker already running (pid $(pid_of "$WORKER_PID"))"
+  else
+    set +u
+    : >"$WORKER_LOG"
+    spawn_detached "$WORKER_PID" "$WORKER_LOG" \
+      "$ROOT/target/debug/collectemoi-worker" \
+      --data-dir "$DATA_DIR" \
+      --poll-secs "$POLL_SECS" \
+      "${EXTRA_WORKER_ARGS[@]}"
+    set -u
+    ok "worker started (pid $(pid_of "$WORKER_PID"))"
+  fi
+
+  info "waiting up to ${WAIT_SECS}s for health…"
+  if wait_healthy "$WAIT_SECS"; then
+    ok "healthy  →  $PUBLIC_URL"
+  else
+    err "api failed health check — last log lines:"
+    tail -n 40 "$API_LOG" >&2 || true
+    exit 1
+  fi
+
+  printf '\n'
+  kv "admin" "$PUBLIC_URL/admin"
+  kv "status" "$PUBLIC_URL/v1/status"
+  if [[ "$TLS" == "true" ]]; then
+    kv "tls cert" "$(tls_cert_path)" "(self-signed browsers warn — trust or Advanced → Proceed)"
+  fi
+  if [[ "$HTTP_BIND" != "off" && -n "$HTTP_BIND" ]]; then
+    kv "http admin" "http://$HTTP_BIND/admin" "(optional companion)"
+  fi
+  kv "logs" "$API_LOG"
+  printf '\n'
+}
+
+cmd_stop() {
+  hdr "CollecteMoi stop"
+  load_run_config
+  stop_one "api" "$API_PID"
+  stop_one "worker" "$WORKER_PID"
+  # Catch orphaned API still bound after a stale / truncated pid match.
+  if free_bind_port; then
+    :
+  fi
+}
+
+cmd_restart() {
+  cmd_stop
+  cmd_start "$@"
+}
+
+cmd_health() {
+  parse_opts "$@" 2>/dev/null || true
+  load_run_config
+  local api_ok=0 worker_ok=0 http_ok=0
+  is_running "$API_PID" && api_ok=1 || true
+  is_running "$WORKER_PID" && worker_ok=1 || true
+  probe_health && http_ok=1 || true
+
+  if [[ "$JSON_OUT" -eq 1 ]]; then
+    python3 - <<PY
+import json
+print(json.dumps({
+  "ok": bool($api_ok and $http_ok),
+  "api_running": bool($api_ok),
+  "worker_running": bool($worker_ok),
+  "http_ok": bool($http_ok),
+  "public_url": "$PUBLIC_URL",
+}, indent=2))
+PY
+  else
+    if [[ "$api_ok" -eq 1 && "$http_ok" -eq 1 ]]; then
+      ok "healthy  api=$(badge running running)  worker=$( [[ $worker_ok -eq 1 ]] && badge running running || badge warn missing )  $PUBLIC_URL"
+    else
+      err "unhealthy  api=$( [[ $api_ok -eq 1 ]] && badge running running || badge stopped stopped )  http=$( [[ $http_ok -eq 1 ]] && badge ok ok || badge down down )"
+    fi
+  fi
+  [[ "$api_ok" -eq 1 && "$http_ok" -eq 1 ]]
+}
+
+cmd_version() {
+  local api_ver="—" worker_ver="—"
+  if [[ -x "$ROOT/target/debug/collectemoi-api" ]]; then
+    api_ver="$( "$ROOT/target/debug/collectemoi-api" --version 2>/dev/null | head -1 || echo "built" )"
+  fi
+  if [[ -x "$ROOT/target/debug/collectemoi-worker" ]]; then
+    worker_ver="$( "$ROOT/target/debug/collectemoi-worker" --version 2>/dev/null | head -1 || echo "built" )"
+  fi
+  if [[ "$JSON_OUT" -eq 1 ]]; then
+    python3 - <<PY
+import json
+print(json.dumps({
+  "ctl": "$CTL_VERSION",
+  "api": """$api_ver""",
+  "worker": """$worker_ver""",
+  "root": "$ROOT",
+}, indent=2))
+PY
+  else
+    hdr "CollecteMoi versions"
+    kv "ctl" "v$CTL_VERSION"
+    kv "api" "$api_ver"
+    kv "worker" "$worker_ver"
+    kv "root" "$ROOT"
+  fi
+}
+
+cmd_open() {
+  load_run_config
+  local url="$PUBLIC_URL/admin"
+  info "opening $url"
+  if command -v open >/dev/null 2>&1; then
+    open "$url"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$url"
+  else
+    echo "$url"
+  fi
+}
+
+cmd_status() {
+  parse_opts "$@" 2>/dev/null || true
+  load_run_config
+
+  local api_pid="" worker_pid=""
+  local api_st="stopped" worker_st="stopped"
+  if is_running "$API_PID"; then
+    api_pid="$(pid_of "$API_PID")"
+    api_st="running"
+  else
+    rm -f "$API_PID"
+  fi
+  if is_running "$WORKER_PID"; then
+    worker_pid="$(pid_of "$WORKER_PID")"
+    worker_st="running"
+  else
+    rm -f "$WORKER_PID"
+  fi
+
+  local health="down"
+  if [[ -n "$api_pid" ]] && probe_health; then
+    health="ok"
+  elif [[ -n "$api_pid" ]]; then
+    health="unreachable"
+  fi
+
+  local status_json=""
+  if [[ "$health" == "ok" ]]; then
+    status_json="$(fetch_status_json || true)"
+  fi
+
+  if [[ "$JSON_OUT" -eq 1 ]]; then
+    local cert_path server_file
+    cert_path="$(tls_cert_path)"
+    server_file="$(mktemp)"
+    if [[ -n "$status_json" ]]; then
+      printf '%s' "$status_json" >"$server_file"
+    else
+      printf 'null' >"$server_file"
+    fi
+    python3 - \
+      "$CTL_VERSION" "$health" "$PUBLIC_URL" "$BIND" "$DATA_DIR" "$RUN_DIR" \
+      "$TLS" "$HTTP_BIND" "$api_st" "${api_pid:-}" "$worker_st" "${worker_pid:-}" \
+      "$cert_path" "$server_file" <<'PY'
+import json, subprocess, sys
+from pathlib import Path
+
+def dir_bytes(p):
+    try:
+        out = subprocess.check_output(["du", "-sk", str(p)], text=True)
+        return int(out.split()[0]) * 1024
+    except Exception:
+        return 0
+
+(
+  ctl_version, health, public_url, bind, data_dir, run_dir,
+  tls, http_bind, api_st, api_pid, worker_st, worker_pid,
+  cert_path, server_file
+) = sys.argv[1:15]
+
+data = Path(data_dir)
+cert = Path(cert_path)
+server = json.loads(Path(server_file).read_text())
+Path(server_file).unlink(missing_ok=True)
+payload = {
+  "ctl_version": ctl_version,
+  "health": health,
+  "public_url": public_url,
+  "bind": bind,
+  "data_dir": data_dir,
+  "run_dir": run_dir,
+  "tls": tls == "true",
+  "http_bind": http_bind,
+  "api": {"state": api_st, "pid": int(api_pid) if api_pid else None},
+  "worker": {"state": worker_st, "pid": int(worker_pid) if worker_pid else None},
+  "storage": {
+    "data_bytes": dir_bytes(data),
+    "db_bytes": (data/"collectemoi.db").stat().st_size if (data/"collectemoi.db").is_file() else 0,
+    "blobs_bytes": dir_bytes(data/"blobs"),
+    "uploads_bytes": dir_bytes(data/"uploads"),
+  },
+  "tls_cert": str(cert) if cert.is_file() else None,
+  "server": server,
+}
+print(json.dumps(payload, indent=2))
+PY
+    return 0
+  fi
+
+  printf '%s%sCollecteMoi%s  %sv%s%s' "$C_BOLD" "$C_CYAN" "$C_RESET" "$C_DIM" "$CTL_VERSION" "$C_RESET"
+  printf '  %s%s%s\n' "$C_DIM" "$(date -u +"%Y-%m-%d %H:%M:%SZ")" "$C_RESET"
+
+  hdr "Runtime"
+  kv "data" "$DATA_DIR"
+  kv "run" "$RUN_DIR"
+  kv "bind" "$BIND"
+  kv "public" "$PUBLIC_URL"
+  kv "tls" "$( [[ "$TLS" == "true" ]] && echo on || echo off )" "http_bind=$HTTP_BIND  lab_seal=$LAB_SEAL  poll=${POLL_SECS}s"
+  if [[ -f "$RUN_DIR/config.json" ]]; then
+    local started
+    started="$(python3 -c "import json;print(json.load(open('$RUN_DIR/config.json')).get('started_at','—'))" 2>/dev/null || echo "—")"
+    kv "ctl start" "$started"
+  fi
+
+  hdr "Processes"
+  if [[ -n "$api_pid" ]]; then
+    kv "api" "$(badge running running)  pid $api_pid" "$(proc_info "$api_pid")"
+  else
+    kv "api" "$(badge stopped stopped)"
+  fi
+  if [[ -n "$worker_pid" ]]; then
+    kv "worker" "$(badge running running)  pid $worker_pid" "$(proc_info "$worker_pid")"
+  else
+    kv "worker" "$(badge stopped stopped)"
+  fi
+  case "$health" in
+    ok) kv "health" "$(badge ok ok)" ;;
+    unreachable) kv "health" "$(badge warn unreachable)" "process up, probe failed" ;;
+    *) kv "health" "$(badge down down)" ;;
+  esac
+
+  hdr "Endpoints"
+  kv "admin" "$PUBLIC_URL/admin"
+  kv "status" "$PUBLIC_URL/v1/status"
+  kv "healthz" "$PUBLIC_URL/healthz"
+  if [[ "$HTTP_BIND" != "off" && -n "$HTTP_BIND" ]]; then
+    kv "http admin" "http://$HTTP_BIND/admin"
+  fi
+
+  hdr "TLS"
+  local cert
+  cert="$(tls_cert_path)"
+  if [[ -f "$cert" ]]; then
+    kv "cert" "$cert"
+    python3 - "$cert" <<'PY' 2>/dev/null || true
+import subprocess, sys, datetime
+cert = sys.argv[1]
+try:
+    out = subprocess.check_output(
+        ["openssl", "x509", "-in", cert, "-noout", "-dates", "-subject", "-issuer"],
+        text=True, stderr=subprocess.DEVNULL,
+    )
+except Exception:
+    raise SystemExit
+meta = {}
+for line in out.splitlines():
+    if "=" in line:
+        k, v = line.split("=", 1)
+        meta[k.strip()] = v.strip()
+nb = meta.get("notBefore", "")
+na = meta.get("notAfter", "")
+subj = meta.get("subject", "")
+print(f"  subject        {subj}")
+print(f"  valid          {nb}  →  {na}")
+# crude remaining days via openssl -checkend
+try:
+    subprocess.check_call(
+        ["openssl", "x509", "-in", cert, "-noout", "-checkend", str(30*86400)],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    print("  expiry         ok (>30 days)")
+except subprocess.CalledProcessError:
+    print("  expiry         WARNING — expires within 30 days")
+PY
+  else
+    kv "cert" "(missing — will auto-generate on start)"
+  fi
+
+  hdr "Storage"
+  local data_b db_b blobs_b uploads_b
+  data_b="$(dir_size "$DATA_DIR")"
+  db_b="$( [[ -f "$DATA_DIR/collectemoi.db" ]] && wc -c <"$DATA_DIR/collectemoi.db" | tr -d ' ' || echo 0 )"
+  blobs_b="$(dir_size "$DATA_DIR/blobs")"
+  uploads_b="$(dir_size "$DATA_DIR/uploads")"
+  kv "total" "$(human_bytes "$data_b")"
+  kv "sqlite" "$(human_bytes "$db_b")" "$DATA_DIR/collectemoi.db"
+  kv "blobs" "$(human_bytes "$blobs_b")"
+  kv "uploads" "$(human_bytes "$uploads_b")"
+
+  if [[ -n "$status_json" ]]; then
+    hdr "Catalogue"
+    python3 - <<'PY' "$status_json"
+import json, sys
+o = json.loads(sys.argv[1])
+s = o.get("settings") or {}
+uptime = int(o.get("uptime_secs") or 0)
+h, rem = divmod(uptime, 3600)
+m, sec = divmod(rem, 60)
+def kv(k, v):
+    print(f"  {k:<14} {v}")
+kv("version", o.get("version"))
+kv("uptime", f"{h}h {m}m {sec}s")
+kv("display", s.get("display_name") or "—")
+kv("devices", o.get("devices"))
+kv("uploads", f"{o.get('uploads_complete')}/{o.get('uploads')} complete")
+kv("blobs", f"{o.get('blobs')}  ({o.get('blob_downloads') or 0} downloads)")
+kv("jobs", f"{o.get('jobs_pending')} pending")
+kv("access", f"{o.get('access_total') or 0} hits")
+kv("companies", f"{o.get('companies')}   lab_keys={o.get('lab_keys')}   banned={o.get('banned_keys')}")
+kv("enroll", f"{o.get('enrollment_events')} events")
+pk = o.get("case_public_key") or ""
+if len(pk) > 32:
+    kv("case pk", f"{pk[:16]}…{pk[-8:]}")
+else:
+    kv("case pk", pk or "—")
+recent = o.get("recent_enrollment") or []
+if recent:
+    print("  recent enroll")
+    for e in recent[:5]:
+        who = e.get("email") or e.get("lab_key") or "—"
+        detail = (e.get("detail") or "")[:56]
+        print(f"    · {e.get('event')}  {who}  {detail}")
+PY
+  elif [[ "$health" != "ok" ]]; then
+    hdr "Catalogue"
+    info "server unreachable — start the stack for live catalogue stats"
+    if [[ -f "$DATA_DIR/collectemoi.db" ]]; then
+      python3 - "$DATA_DIR/collectemoi.db" <<'PY' 2>/dev/null || true
+import sqlite3, sys
+db = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+def count(t):
+    try: return db.execute(f"select count(*) from {t}").fetchone()[0]
+    except Exception: return "—"
+print(f"  {'devices':<14} {count('devices')}")
+print(f"  {'uploads':<14} {count('uploads')}")
+print(f"  {'blobs':<14} {count('blobs')}")
+print(f"  {'access':<14} {count('access_events')}")
+print(f"  {'jobs':<14} {count('jobs')}")
+PY
+    fi
+  fi
+
+  hdr "Recent logs"
+  printf '  %sapi%s  %s\n' "$C_DIM" "$C_RESET" "$API_LOG"
+  if [[ -f "$API_LOG" ]]; then
+    tail -n 8 "$API_LOG" | sed 's/^/    /' || true
+  else
+    printf '    %s(no api log yet)%s\n' "$C_DIM" "$C_RESET"
+  fi
+  printf '  %sworker%s  %s\n' "$C_DIM" "$C_RESET" "$WORKER_LOG"
+  if [[ -f "$WORKER_LOG" ]]; then
+    tail -n 5 "$WORKER_LOG" | sed 's/^/    /' || true
+  else
+    printf '    %s(no worker log yet)%s\n' "$C_DIM" "$C_RESET"
+  fi
+  printf '\n'
+}
+
+cmd_doctor() {
+  parse_opts "$@" 2>/dev/null || true
+  load_run_config
+  hdr "CollecteMoi doctor"
+  local issues=0
+
+  # toolchain
+  if command -v cargo >/dev/null 2>&1; then
+    ok "cargo  $(cargo --version 2>/dev/null | head -1)"
+  else
+    err "cargo missing"; issues=$((issues+1))
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    ok "curl   $(curl --version 2>/dev/null | head -1 | awk '{print $1,$2}')"
+  else
+    err "curl missing"; issues=$((issues+1))
+  fi
+  if command -v openssl >/dev/null 2>&1; then
+    ok "openssl $(openssl version 2>/dev/null)"
+  else
+    warn "openssl missing (cert inspection limited)"
+  fi
+  if command -v sqlite3 >/dev/null 2>&1; then
+    ok "sqlite3 $(sqlite3 --version 2>/dev/null | awk '{print $1}')"
+  else
+    warn "sqlite3 missing (offline catalogue peek unavailable)"
+  fi
+
+  # binaries
+  if [[ -x "$ROOT/target/debug/collectemoi-api" ]]; then
+    ok "api binary  $ROOT/target/debug/collectemoi-api"
+  else
+    warn "api binary missing — will build on start"
+  fi
+  if [[ -x "$ROOT/target/debug/collectemoi-worker" ]]; then
+    ok "worker binary  $ROOT/target/debug/collectemoi-worker"
+  else
+    warn "worker binary missing — will build on start"
+  fi
+
+  # paths
+  mkdir -p "$DATA_DIR" "$RUN_DIR"
+  ok "data dir writable  $DATA_DIR"
+  ok "run dir writable   $RUN_DIR"
+
+  # db
+  if [[ -f "$DATA_DIR/collectemoi.db" ]]; then
+    if sqlite3 "$DATA_DIR/collectemoi.db" "PRAGMA integrity_check;" 2>/dev/null | grep -q '^ok$'; then
+      ok "sqlite integrity ok  ($(human_bytes "$(wc -c <"$DATA_DIR/collectemoi.db" | tr -d ' ')"))"
+    else
+      err "sqlite integrity check failed"; issues=$((issues+1))
+    fi
+  else
+    warn "sqlite not created yet (first start will initialize)"
+  fi
+
+  # tls
+  local cert
+  cert="$(tls_cert_path)"
+  if [[ -f "$cert" ]]; then
+    if openssl x509 -in "$cert" -noout -checkend 0 >/dev/null 2>&1; then
+      ok "tls cert valid  $cert"
+    else
+      err "tls cert expired  $cert"; issues=$((issues+1))
+    fi
+    if [[ ! -f "${TLS_KEY:-$DATA_DIR/tls/server.key}" ]]; then
+      err "tls key missing"; issues=$((issues+1))
+    else
+      ok "tls key present"
+    fi
+  else
+    info "tls cert absent — auto-generated on first HTTPS start"
+  fi
+
+  # port bind check
+  local host port
+  host="${BIND%:*}"; port="${BIND##*:}"
+  if is_running "$API_PID"; then
+    ok "api process running (pid $(pid_of "$API_PID"))"
+    if probe_health; then
+      ok "healthz reachable at $PUBLIC_URL"
+    else
+      err "api running but healthz unreachable"; issues=$((issues+1))
+    fi
+  else
+    if python3 - "$host" "$port" <<'PY' 2>/dev/null
+import socket, sys
+host, port = sys.argv[1], int(sys.argv[2])
+s = socket.socket()
+s.settimeout(0.4)
+try:
+    s.connect((host if host not in ("0.0.0.0","::") else "127.0.0.1", port))
+except Exception:
+    raise SystemExit(0)  # free
+else:
+    raise SystemExit(2)  # in use
+finally:
+    s.close()
+PY
+    then
+      ok "port $BIND appears free"
+    else
+      warn "port $BIND looks occupied (another process?)"
+      issues=$((issues+1))
+    fi
+  fi
+
+  # disk headroom
+  python3 - "$DATA_DIR" <<'PY' 2>/dev/null || true
+import shutil, sys
+total, used, free = shutil.disk_usage(sys.argv[1])
+pct = used * 100 // total
+print(f"  disk           {free//(1024**3)} GB free  ({pct}% used)")
+if free < 512 * 1024 * 1024:
+    print("  disk           WARNING — under 512 MB free")
+    raise SystemExit(3)
+PY
+  local disk_rc=$?
+  if [[ "$disk_rc" -eq 3 ]]; then
+    issues=$((issues+1))
+  fi
+
+  printf '\n'
+  if [[ "$issues" -eq 0 ]]; then
+    ok "doctor: all clear"
+  else
+    err "doctor: $issues issue(s) found"
+    return 1
+  fi
+}
+
+cmd_logs() {
+  local lines=80 source="all" follow=0 errors_only=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --lines|-n) lines="$2"; shift 2 ;;
+      --source) source="$2"; shift 2 ;;
+      --follow|-f) follow=1; shift ;;
+      --errors) errors_only=1; shift ;;
+      --data-dir) DATA_DIR="$2"; RUN_DIR="$DATA_DIR/run"; shift 2 ;;
+      --run-dir) RUN_DIR="$2"; shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      *) shift ;;
+    esac
+  done
+  refresh_paths
+  mkdir -p "$RUN_DIR"
+  touch "$API_LOG" "$WORKER_LOG"
+
+  local files=()
+  case "$source" in
+    api) files=("$API_LOG") ;;
+    worker) files=("$WORKER_LOG") ;;
+    all|*) files=("$API_LOG" "$WORKER_LOG") ;;
+  esac
+
+  hdr "Logs  source=$source  lines=$lines"
+  kv "api" "$API_LOG"
+  kv "worker" "$WORKER_LOG"
+  printf '\n'
+
+  filter_errors() {
+    if [[ "$errors_only" -eq 1 ]]; then
+      grep -E 'ERROR|WARN|panic|FAILED' || true
+    else
+      cat
+    fi
+  }
+
+  if [[ "$follow" -eq 1 ]]; then
+    info "following (Ctrl-C to stop)…"
+    if [[ "$errors_only" -eq 1 ]]; then
+      tail -n "$lines" -F "${files[@]}" 2>/dev/null | grep --line-buffered -E 'ERROR|WARN|panic|FAILED' || true
+    else
+      tail -n "$lines" -F "${files[@]}"
+    fi
+  else
+    for f in "${files[@]}"; do
+      printf '%s── %s ──%s\n' "$C_DIM" "$f" "$C_RESET"
+      if [[ -s "$f" ]]; then
+        tail -n "$lines" "$f" | filter_errors | sed 's/^/  /' || true
+      else
+        printf '  %s(empty)%s\n' "$C_DIM" "$C_RESET"
+      fi
+      printf '\n'
+    done
+  fi
+}
+
+cmd_reset_password() {
+  local password="" clear_mfa=1 force_setup=0 yes=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --password|-p) password="$2"; shift 2 ;;
+      --clear-mfa) clear_mfa=1; shift ;;          # default; kept for compatibility
+      --keep-mfa) clear_mfa=0; shift ;;
+      --force-setup) force_setup=1; shift ;;
+      --yes|-y) yes=1; shift ;;
+      --data-dir) DATA_DIR="$2"; RUN_DIR="$DATA_DIR/run"; shift 2 ;;
+      --run-dir) RUN_DIR="$2"; shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      *) echo "unknown reset-password option: $1" >&2; exit 1 ;;
+    esac
+  done
+  refresh_paths
+  load_run_config
+  hdr "Admin password recovery"
+  info "data dir  $DATA_DIR"
+  local db="$DATA_DIR/collectemoi.db"
+  if [[ ! -f "$db" ]]; then
+    err "no database at $db — start the stack once first"
+    exit 1
+  fi
+
+  if [[ "$force_setup" -eq 1 ]]; then
+    if [[ "$yes" -ne 1 ]]; then
+      printf 'Wipe admin account and force first-run setup on /admin? [y/N] '
+      local ans=""
+      read -r ans || true
+      [[ "$ans" == "y" || "$ans" == "Y" || "$ans" == "yes" ]] || { warn "aborted"; exit 1; }
+    fi
+    ensure_built
+    "$ROOT/target/debug/collectemoi-api" --data-dir "$DATA_DIR" --force-admin-setup
+    ok "reload https://127.0.0.1:8080/admin and create a new password"
+    return 0
+  fi
+
+  if [[ -z "$password" ]]; then
+    if [[ ! -t 0 ]]; then
+      err "no TTY — pass --password <pw> (or COLLECTEMOI_ADMIN_PASSWORD)"
+      exit 1
+    fi
+    local p1="" p2=""
+    printf 'New admin password: '
+    stty -echo
+    read -r p1 || true
+    stty echo
+    printf '\nConfirm password: '
+    stty -echo
+    read -r p2 || true
+    stty echo
+    printf '\n'
+    if [[ -z "$p1" ]]; then
+      err "password is required"
+      exit 1
+    fi
+    if [[ "$p1" != "$p2" ]]; then
+      err "passwords do not match"
+      exit 1
+    fi
+    password="$p1"
+  fi
+
+  if [[ "$yes" -ne 1 ]]; then
+    printf 'Reset password for user admin in %s' "$db"
+    if [[ "$clear_mfa" -eq 1 ]]; then
+      printf ' (and clear MFA)'
+    else
+      printf ' (keeping MFA)'
+    fi
+    printf '? [y/N] '
+    local ans=""
+    read -r ans || true
+    [[ "$ans" == "y" || "$ans" == "Y" || "$ans" == "yes" ]] || { warn "aborted"; exit 1; }
+  fi
+
+  ensure_built
+  # Stop API first so SQLite write is uncontested and in-memory lockout cannot
+  # reject the new password after recovery.
+  if is_running "$API_PID" || curl -kfsS "$(admin_api_base)/healthz" >/dev/null 2>&1; then
+    info "stopping API before password reset…"
+    stop_one "api" "$API_PID" || true
+  fi
+  # Prefer a free bind port so restart is clean; still write the hash if an
+  # orphan holds the port (SQLite update does not need the listener down).
+  if ! free_bind_port; then
+    warn "port :${BIND##*:} still bound — writing password anyway; restart may need: kill -9 \$(lsof -nP -iTCP:${BIND##*:} -sTCP:LISTEN -t)"
+  fi
+
+  local args=(--data-dir "$DATA_DIR" --reset-admin-password --new-password "$password")
+  if [[ "$clear_mfa" -eq 1 ]]; then
+    args+=(--clear-mfa)
+  fi
+  "$ROOT/target/debug/collectemoi-api" "${args[@]}"
+
+  info "restarting API with a clean login lockout state…"
+  QUIET=1
+  if ! cmd_start --data-dir "$DATA_DIR" --run-dir "$RUN_DIR" --bind "$BIND" --public-url "$PUBLIC_URL" \
+    --lab-seal "$LAB_SEAL" --tls "$TLS" --http-bind "$HTTP_BIND" \
+    ${TLS_CERT:+--tls-cert "$TLS_CERT"} ${TLS_KEY:+--tls-key "$TLS_KEY"}; then
+    warn "password was reset in SQLite, but API failed to start — run: kill -9 \$(lsof -nP -iTCP:${BIND##*:} -sTCP:LISTEN -t); ./scripts/collectemoictl start"
+  fi
+
+  ok "sign in at the admin console as admin with the new password"
+  info "hard-reload the browser tab (Cmd-Shift-R) if a login page was already open"
+  local base
+  base="$(admin_api_base)"
+  if [[ -n "$base" ]]; then
+    info "console  $base/admin"
+  fi
+}
+
+cmd_export() {
+  local out="" keys=0 blobs=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --out|-o) out="$2"; shift 2 ;;
+      --keys) keys=1; shift ;;
+      --blobs) blobs=1; shift ;;
+      --data-dir) DATA_DIR="$2"; RUN_DIR="$DATA_DIR/run"; shift 2 ;;
+      --run-dir) RUN_DIR="$2"; shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      *) echo "unknown export option: $1" >&2; exit 1 ;;
+    esac
+  done
+  refresh_paths
+  load_run_config
+  if [[ -z "$out" ]]; then
+    out="$ROOT/collectemoi-backup-$(date -u +%Y%m%dT%H%M%SZ).zip"
+  fi
+  hdr "Export"
+  local base
+  base="$(admin_api_base)"
+  if [[ -n "$base" ]] && curl -kfsS "$base/healthz" >/dev/null 2>&1; then
+    local q="keys=$([[ $keys -eq 1 ]] && echo true || echo false)&blobs=$([[ $blobs -eq 1 ]] && echo true || echo false)"
+    info "via live API  $base/v1/admin/export"
+    curl -kfsS "$base/v1/admin/export?$q" -o "$out"
+    ok "wrote $out ($(human_bytes "$(wc -c <"$out" | tr -d ' ')"))"
+    return 0
+  fi
+
+  warn "API not reachable — offline export from $DATA_DIR"
+  ensure_built
+  python3 - "$DATA_DIR" "$out" "$keys" "$blobs" <<'PY'
+import json, os, sqlite3, sys, time, zipfile
+from pathlib import Path
+data, out, keys, blobs = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]=="1", sys.argv[4]=="1"
+db = data / "collectemoi.db"
+if not db.is_file():
+    sys.exit(f"missing {db}")
+tmp = data / "run" / f"offline-export-{os.getpid()}.db"
+tmp.parent.mkdir(parents=True, exist_ok=True)
+src = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+dst = sqlite3.connect(tmp)
+src.backup(dst)
+dst.close(); src.close()
+manifest = {
+    "format": "collectemoi-backup",
+    "version": 1,
+    "created_at": str(int(time.time())),
+    "include_keys": keys,
+    "include_blobs": blobs,
+    "has_settings": False,
+    "note": "Offline collectemoictl export",
+}
+with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as z:
+    z.writestr("manifest.json", json.dumps(manifest, indent=2))
+    z.write(tmp, "collectemoi.db")
+    if keys:
+        kdir = data / "keys"
+        if kdir.is_dir():
+            for p in kdir.rglob("*"):
+                if p.is_file():
+                    z.write(p, Path("keys") / p.relative_to(kdir))
+    if blobs:
+        bdir = data / "blobs"
+        if bdir.is_dir():
+            for p in bdir.rglob("*"):
+                if p.is_file():
+                    z.write(p, Path("blobs") / p.relative_to(bdir))
+tmp.unlink(missing_ok=True)
+print(f"wrote {out} ({out.stat().st_size} bytes)")
+PY
+  ok "offline export complete"
+}
+
+cmd_import() {
+  local zip="" keys=0 blobs=0 force=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --keys) keys=1; shift ;;
+      --blobs) blobs=1; shift ;;
+      --force) force=1; shift ;;
+      --data-dir) DATA_DIR="$2"; RUN_DIR="$DATA_DIR/run"; shift 2 ;;
+      --run-dir) RUN_DIR="$2"; shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      -*) echo "unknown import option: $1" >&2; exit 1 ;;
+      *) zip="$1"; shift ;;
+    esac
+  done
+  refresh_paths
+  load_run_config
+  if [[ -z "$zip" || ! -f "$zip" ]]; then
+    err "usage: $(basename "$0") import <file.zip> [--keys] [--blobs] [--force]"
+    exit 1
+  fi
+  if [[ "$force" -ne 1 ]]; then
+    err "refusing import without --force (replaces SQLite catalogue)"
+    exit 1
+  fi
+  hdr "Import"
+  local base
+  base="$(admin_api_base)"
+  if [[ -n "$base" ]] && curl -kfsS "$base/healthz" >/dev/null 2>&1; then
+    local q="confirm=true&keys=$([[ $keys -eq 1 ]] && echo true || echo false)&blobs=$([[ $blobs -eq 1 ]] && echo true || echo false)"
+    info "via live API  $base/v1/admin/import"
+    curl -kfsS -X POST "$base/v1/admin/import?$q" -F "file=@${zip};type=application/zip"
+    echo
+    ok "import complete"
+    return 0
+  fi
+
+  warn "API not reachable — offline import into $DATA_DIR"
+  python3 - "$DATA_DIR" "$zip" "$keys" "$blobs" <<'PY'
+import json, os, shutil, sqlite3, sys, zipfile
+from pathlib import Path
+data, zpath, keys, blobs = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]=="1", sys.argv[4]=="1"
+staging = data / "run" / f"offline-import-{os.getpid()}"
+if staging.exists():
+    shutil.rmtree(staging)
+staging.mkdir(parents=True)
+with zipfile.ZipFile(zpath) as z:
+    for info in z.infolist():
+        name = Path(info.filename)
+        if name.is_absolute() or ".." in name.parts:
+            sys.exit(f"unsafe zip entry: {info.filename}")
+        z.extract(info, staging)
+manifest = json.loads((staging/"manifest.json").read_text())
+assert manifest.get("format") == "collectemoi-backup", manifest
+src_db = staging / "collectemoi.db"
+if not src_db.is_file():
+    sys.exit("missing collectemoi.db in zip")
+live = data / "collectemoi.db"
+live.parent.mkdir(parents=True, exist_ok=True)
+tmp = live.with_suffix(".db.importing")
+src = sqlite3.connect(f"file:{src_db}?mode=ro", uri=True)
+dst = sqlite3.connect(tmp)
+src.backup(dst)
+dst.close(); src.close()
+os.replace(tmp, live)
+print(f"restored {live}")
+if keys and (staging/"keys").is_dir():
+    dest = data/"keys"; dest.mkdir(parents=True, exist_ok=True)
+    n=0
+    for p in (staging/"keys").rglob("*"):
+        if p.is_file():
+            rel = p.relative_to(staging/"keys")
+            out = dest/rel
+            out.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(p, out); n+=1
+    print(f"restored {n} key files")
+if blobs and (staging/"blobs").is_dir():
+    dest = data/"blobs"; dest.mkdir(parents=True, exist_ok=True)
+    n=0
+    for p in (staging/"blobs").rglob("*"):
+        if p.is_file():
+            rel = p.relative_to(staging/"blobs")
+            out = dest/rel
+            out.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(p, out); n+=1
+    print(f"restored {n} blob files")
+shutil.rmtree(staging, ignore_errors=True)
+print("done — start/restart the stack to load the restored catalogue")
+PY
+  ok "offline import complete"
+}
+
+docker_package_args() {
+  PACKAGE_PLATFORM="linux/amd64"
+  PACKAGE_TAG="collectemoi:deploy-$(date +%Y%m%d-%H%M%S)"
+  PACKAGE_OUT=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --platform) [[ $# -ge 2 ]] || { err "--platform requires a value"; return 1; }; PACKAGE_PLATFORM="$2"; shift 2 ;;
+      --tag) [[ $# -ge 2 ]] || { err "--tag requires a value"; return 1; }; PACKAGE_TAG="$2"; shift 2 ;;
+      --out) [[ $# -ge 2 ]] || { err "--out requires a path"; return 1; }; PACKAGE_OUT="$2"; shift 2 ;;
+      -h|--help) usage; return 2 ;;
+      *) err "unknown package option: $1"; return 1 ;;
+    esac
+  done
+  case "$PACKAGE_PLATFORM" in linux/amd64|linux/arm64) ;; *) err "supported platforms: linux/amd64, linux/arm64"; return 1 ;; esac
+  [[ "$PACKAGE_TAG" =~ ^[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+$ ]] || { err "invalid Docker image tag: $PACKAGE_TAG"; return 1; }
+  if [[ -z "$PACKAGE_OUT" ]]; then
+    PACKAGE_OUT="$ROOT/dist/collectemoi-$(date +%Y%m%d-%H%M%S).tar.gz"
+  elif [[ "$PACKAGE_OUT" != /* ]]; then
+    PACKAGE_OUT="$PWD/$PACKAGE_OUT"
+  fi
+}
+
+build_docker_package() {
+  local out_tmp
+  command -v docker >/dev/null 2>&1 || { err "Docker is required to package the server"; return 1; }
+  docker buildx version >/dev/null 2>&1 || { err "Docker Buildx is required to package the server"; return 1; }
+  mkdir -p "$(dirname "$PACKAGE_OUT")"
+  hdr "Docker package"
+  info "building $PACKAGE_TAG for $PACKAGE_PLATFORM"
+  docker buildx build --platform "$PACKAGE_PLATFORM" --tag "$PACKAGE_TAG" --load "$ROOT"
+  out_tmp="${PACKAGE_OUT}.tmp.$$"
+  if ! docker save "$PACKAGE_TAG" | gzip -c > "$out_tmp"; then
+    rm -f "$out_tmp"
+    err "failed to save Docker image"
+    return 1
+  fi
+  mv "$out_tmp" "$PACKAGE_OUT"
+  ok "wrote $PACKAGE_OUT"
+  info "image: $PACKAGE_TAG"
+  if command -v shasum >/dev/null 2>&1; then
+    info "sha256: $(shasum -a 256 "$PACKAGE_OUT" | awk '{print $1}')"
+  fi
+}
+
+cmd_package() {
+  docker_package_args "$@" || { local rc=$?; [[ $rc -eq 2 ]] && return 0; return "$rc"; }
+  build_docker_package
+}
+
+shell_quote() {
+  local value="${1//\'/\'\\\'\'}"
+  printf "'%s'" "$value"
+}
+
+cmd_push() {
+  local target="" ssh_port=22 port=8080 public_url="" host remote_archive remote_dir="/tmp"
+  local platform="linux/amd64" tag="" out=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --ssh-port) [[ $# -ge 2 ]] || { err "--ssh-port requires a value"; return 1; }; ssh_port="$2"; shift 2 ;;
+      --port) [[ $# -ge 2 ]] || { err "--port requires a value"; return 1; }; port="$2"; shift 2 ;;
+      --public-url) [[ $# -ge 2 ]] || { err "--public-url requires a value"; return 1; }; public_url="$2"; shift 2 ;;
+      --platform) [[ $# -ge 2 ]] || { err "--platform requires a value"; return 1; }; platform="$2"; shift 2 ;;
+      --tag) [[ $# -ge 2 ]] || { err "--tag requires a value"; return 1; }; tag="$2"; shift 2 ;;
+      --out) [[ $# -ge 2 ]] || { err "--out requires a path"; return 1; }; out="$2"; shift 2 ;;
+      -h|--help) usage; return 0 ;;
+      -*) err "unknown push option: $1"; return 1 ;;
+      *) if [[ -z "$target" ]]; then target="$1"; shift; else err "unexpected argument: $1"; return 1; fi ;;
+    esac
+  done
+  [[ "$target" =~ ^[A-Za-z0-9._-]+(@[A-Za-z0-9.-]+)?$ ]] || { err "usage: $(basename "$0") push <user@host> [options]"; return 1; }
+  [[ "$ssh_port" =~ ^[0-9]+$ ]] && (( ssh_port > 0 && ssh_port < 65536 )) || { err "invalid SSH port: $ssh_port"; return 1; }
+  [[ "$port" =~ ^[0-9]+$ ]] && (( port > 0 && port < 65536 )) || { err "invalid service port: $port"; return 1; }
+  [[ "$platform" == linux/amd64 || "$platform" == linux/arm64 ]] || { err "supported platforms: linux/amd64, linux/arm64"; return 1; }
+  host="${target##*@}"
+  [[ -n "$public_url" ]] || public_url="https://${host}:${port}"
+  [[ "$public_url" == https://* && "$public_url" != *[[:space:]]* ]] || { err "--public-url must be an HTTPS URL without spaces"; return 1; }
+
+  local -a package_args=(--platform "$platform")
+  [[ -n "$tag" ]] && package_args+=(--tag "$tag")
+  [[ -n "$out" ]] && package_args+=(--out "$out")
+  docker_package_args "${package_args[@]}" || return $?
+  build_docker_package || return $?
+
+  remote_archive="$remote_dir/$(basename "$PACKAGE_OUT")"
+  hdr "Deploying quick-test stack"
+  info "copying image archive to $target:$remote_archive"
+  scp -P "$ssh_port" "$PACKAGE_OUT" "$target:$remote_archive"
+  info "starting containers on $target"
+  ssh -p "$ssh_port" "$target" "sh -s -- $(shell_quote "$remote_archive") $(shell_quote "$PACKAGE_TAG") $(shell_quote "$public_url") $(shell_quote "$port")" <<'REMOTE_SCRIPT'
+set -eu
+archive="$1"; image="$2"; public_url="$3"; port="$4"
+command -v docker >/dev/null 2>&1 || { echo "Docker is required on the VPS" >&2; exit 1; }
+docker load -i "$archive"
+docker volume create collectemoi-test-data >/dev/null
+docker rm -f collectemoi-test-api collectemoi-test-worker >/dev/null 2>&1 || true
+docker run -d --name collectemoi-test-api --restart unless-stopped \
+  -p "$port:8080" -v collectemoi-test-data:/data \
+  "$image" --data-dir /data --bind 0.0.0.0:8080 --public-url "$public_url" --lab-seal true >/dev/null
+docker run -d --name collectemoi-test-worker --restart unless-stopped \
+  -v collectemoi-test-data:/data --entrypoint /usr/local/bin/collectemoi-worker \
+  "$image" --data-dir /data --poll-secs 2 >/dev/null
+rm -f "$archive"
+printf 'API: %s\nAdmin: %s/admin\n' "$public_url" "$public_url"
+printf 'Persistent data volume: collectemoi-test-data\n'
+REMOTE_SCRIPT
+  ok "quick-test deployment is running on $target"
+  info "data persists in Docker volume collectemoi-test-data"
+}
+
+main() {
+  local cmd="${1:-}"
+  shift || true
+  case "$cmd" in
+    start) cmd_start "$@" ;;
+    stop) cmd_stop ;;
+    restart) cmd_stop; cmd_start "$@" ;;
+    status) cmd_status "$@" ;;
+    health) cmd_health "$@" ;;
+    doctor|check) cmd_doctor "$@" ;;
+    logs) cmd_logs "$@" ;;
+    version|--version|-V) cmd_version "$@" ;;
+    open) cmd_open "$@" ;;
+    reset-password|reset-admin-password) cmd_reset_password "$@" ;;
+    export) cmd_export "$@" ;;
+    import) cmd_import "$@" ;;
+    package) cmd_package "$@" ;;
+    push) cmd_push "$@" ;;
+    -h|--help|help|"") usage; [[ -n "$cmd" ]] || exit 1 ;;
+    *) err "unknown command: $cmd"; usage; exit 1 ;;
+  esac
+}
+
+main "$@"

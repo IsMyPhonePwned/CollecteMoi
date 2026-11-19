@@ -1,0 +1,43 @@
+[package]
+name = "collectemoi-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CollecteMoi device API server (upload ingestion)"
+
+[[bin]]
+name = "collectemoi-api"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+argon2 = { workspace = true }
+axum = { workspace = true }
+axum-server = { workspace = true }
+base64 = { workspace = true }
+bytes = { workspace = true }
+chacha20poly1305 = { workspace = true }
+clap = { workspace = true }
+collectemoi-db = { workspace = true }
+collectemoi-envelope = { workspace = true }
+collectemoi-proto = { workspace = true }
+hex = { workspace = true }
+qrcode = { workspace = true }
+rand = { workspace = true }
+rcgen = { workspace = true }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "aws-lc-rs"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { version = "0.7", features = ["io"] }
+totp-rs = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+webauthn-rs = { workspace = true }
+zip = { workspace = true }

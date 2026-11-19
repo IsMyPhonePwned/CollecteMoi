@@ -1,0 +1,8 @@
+{
+  "artefact": "android_bugreport",
+  "envelope_len": 321,
+  "envelope_sha256": "9e1fca6690a1f4c329ae16be372f69c090de6815e9434cca22fe528325020e02",
+  "plaintext": "CollecteMoi vector plaintext v1",
+  "plaintext_len": 31,
+  "rng_seed": "0x2a * 32"
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@collectemoi/client",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Desktop TypeScript client for CollecteMoi (enroll, collect requests, upload)",
+  "type": "module",
+  "bin": {
+    "collectemoi": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "tsx src/cli.ts",
+    "ui": "tsx src/ui/server.ts",
+    "enroll": "tsx src/cli.ts enroll",
+    "requests": "tsx src/cli.ts requests",
+    "upload": "tsx src/cli.ts upload",
+    "collect": "tsx src/cli.ts collect"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.9.0",
+    "@noble/hashes": "^1.8.0",
+    "undici": "^7.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

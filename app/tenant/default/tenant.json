@@ -1,0 +1,18 @@
+{
+  "id": "default",
+  "display_name": "CollectMoi",
+  "tagline": "pouet",
+  "enroll_lead": "poeut opouet",
+  "server_base_url": "https://127.0.0.1:8080",
+  "support_contact": "",
+  "privacy_policy_url": "",
+  "default_locale": "en",
+  "mode": "generic",
+  "enabled_collectors": [
+    "android_bugreport",
+    "ios_sysdiagnose",
+    "message_report"
+  ],
+  "tls_pins_spki_sha256": [],
+  "case_encryption_public_key_hex": ""
+}

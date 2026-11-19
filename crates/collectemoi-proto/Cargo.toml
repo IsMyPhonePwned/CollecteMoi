@@ -1,0 +1,11 @@
+[package]
+name = "collectemoi-proto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CollecteMoi API request/response types"
+
+[dependencies]
+serde = { workspace = true }
+utoipa = { workspace = true }
+uuid = { workspace = true }
