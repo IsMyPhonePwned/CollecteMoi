@@ -187,6 +187,13 @@ pub async fn import_backup(
             if let Some(b) = v.get("allow_dev_envelope").and_then(|x| x.as_bool()) {
                 s.allow_dev_envelope = b;
             }
+            if let Some(n) = v
+                .get("healthz_interval_secs")
+                .and_then(|x| x.as_u64())
+            {
+                s.healthz_interval_secs =
+                    crate::settings::clamp_healthz_interval_secs(n);
+            }
             if let Err(e) = crate::settings::save_persisted(&state.db, &s) {
                 tracing::warn!(error = %e, "failed to persist imported settings");
             }

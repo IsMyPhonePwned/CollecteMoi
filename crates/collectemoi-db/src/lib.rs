@@ -61,6 +61,7 @@ impl Db {
         ensure_access_events_admin(&conn)?;
         ensure_devices_client_meta(&conn)?;
         ensure_devices_rate_limit_bypass(&conn)?;
+        ensure_devices_key_history(&conn)?;
         ensure_access_events_client_meta(&conn)?;
         {
             let applied: Option<i64> = conn
@@ -632,8 +633,8 @@ impl Db {
                 device_id, case_id, public_key, noise_key, noise_key_fingerprint,
                 platform, model, os_version, enrolled_at, banned, email, company_id,
                 app_version, manufacturer, brand, device_name, details_json, last_seen_at,
-                rate_limit_bypass
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)
+                rate_limit_bypass, key_history_json
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)
              ON CONFLICT(device_id) DO UPDATE SET
                 case_id=excluded.case_id,
                 public_key=excluded.public_key,
@@ -652,6 +653,7 @@ impl Db {
                 device_name=excluded.device_name,
                 details_json=excluded.details_json,
                 rate_limit_bypass=excluded.rate_limit_bypass,
+                key_history_json=excluded.key_history_json,
                 last_seen_at=CASE
                     WHEN excluded.last_seen_at != '' THEN excluded.last_seen_at
                     ELSE devices.last_seen_at
@@ -676,6 +678,7 @@ impl Db {
                 d.details_json,
                 d.last_seen_at,
                 if d.rate_limit_bypass { 1 } else { 0 },
+                d.key_history_json,
             ],
         )?;
         Ok(())
@@ -733,7 +736,7 @@ impl Db {
     const DEVICE_SELECT: &'static str = "device_id, case_id, public_key, noise_key, noise_key_fingerprint,
                     platform, model, os_version, enrolled_at, banned, email, company_id,
                     app_version, manufacturer, brand, device_name, details_json, last_seen_at,
-                    rate_limit_bypass";
+                    rate_limit_bypass, key_history_json";
 
     pub fn device_list(&self) -> Result<Vec<DeviceRow>> {
         let conn = self.acquire()?;
@@ -1581,6 +1584,9 @@ pub struct DeviceRow {
     /// When true, skip the company per-device upload quota.
     #[serde(default)]
     pub rate_limit_bypass: bool,
+    /// JSON array of previous keys after wipe/reinstall rebind.
+    #[serde(default)]
+    pub key_history_json: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1781,6 +1787,7 @@ fn row_to_device(r: &rusqlite::Row<'_>) -> rusqlite::Result<DeviceRow> {
         details_json: r.get::<_, String>(16).unwrap_or_default(),
         last_seen_at: r.get::<_, String>(17).unwrap_or_default(),
         rate_limit_bypass: r.get::<_, i64>(18).unwrap_or(0) != 0,
+        key_history_json: r.get::<_, String>(19).unwrap_or_else(|_| "[]".into()),
     })
 }
 
@@ -1854,6 +1861,18 @@ fn ensure_devices_rate_limit_bypass(conn: &Connection) -> Result<()> {
     if !cols.iter().any(|c| c == "rate_limit_bypass") {
         conn.execute(
             "ALTER TABLE devices ADD COLUMN rate_limit_bypass INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+/// Soft-migrate: devices.key_history_json (previous keys after rebind).
+fn ensure_devices_key_history(conn: &Connection) -> Result<()> {
+    let cols = table_columns(conn, "devices")?;
+    if !cols.iter().any(|c| c == "key_history_json") {
+        conn.execute(
+            "ALTER TABLE devices ADD COLUMN key_history_json TEXT NOT NULL DEFAULT '[]'",
             [],
         )?;
     }

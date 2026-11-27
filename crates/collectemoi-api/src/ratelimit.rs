@@ -160,6 +160,15 @@ impl IpState {
     }
 }
 
+/// Admin snapshot of a device’s rolling upload-session window.
+#[derive(Debug, Clone, Copy)]
+pub struct DeviceUploadUsage {
+    pub used: u32,
+    pub window_secs: u64,
+    /// Seconds until the oldest event falls out of the window (if any).
+    pub retry_after_secs: Option<u64>,
+}
+
 #[derive(Debug, Default)]
 struct DeviceUploadWindow {
     /// Timestamps of accepted `POST /v1/uploads` creates.
@@ -253,6 +262,41 @@ impl RateLimiter {
 
         let st = g.by_device.entry(key.to_string()).or_default();
         st.try_add(now, limit, window)
+    }
+
+    /// Snapshot of rolling upload-session usage for admin (does not record an event).
+    pub fn device_upload_usage(&self, device_id: &str) -> DeviceUploadUsage {
+        let window = Duration::from_secs(self.cfg.device_upload_window_secs.max(60));
+        let key = device_id.trim();
+        if key.is_empty() {
+            return DeviceUploadUsage {
+                used: 0,
+                window_secs: window.as_secs(),
+                retry_after_secs: None,
+            };
+        }
+        let mut g = self.inner.lock().unwrap();
+        let now = Instant::now();
+        let Some(st) = g.by_device.get_mut(key) else {
+            return DeviceUploadUsage {
+                used: 0,
+                window_secs: window.as_secs(),
+                retry_after_secs: None,
+            };
+        };
+        st.prune(now, window);
+        let used = st.events.len() as u32;
+        let retry_after_secs = st.events.front().map(|oldest| {
+            window
+                .saturating_sub(now.duration_since(*oldest))
+                .as_secs()
+                .max(1)
+        });
+        DeviceUploadUsage {
+            used,
+            window_secs: window.as_secs(),
+            retry_after_secs,
+        }
     }
 
     fn classify(method: &str, path: &str) -> TrafficClass {

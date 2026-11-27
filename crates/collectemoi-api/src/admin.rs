@@ -252,6 +252,8 @@ pub struct PublicStatus {
 #[derive(Debug, Serialize)]
 pub struct PublicStatusSettings {
     pub display_name: String,
+    /// Seconds between mobile `/healthz` polls (also returned on `/healthz`).
+    pub healthz_interval_secs: u64,
 }
 
 pub async fn public_status(State(state): State<AppState>) -> Json<PublicStatus> {
@@ -259,7 +261,10 @@ pub async fn public_status(State(state): State<AppState>) -> Json<PublicStatus> 
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let display_name = state.settings.lock().unwrap().display_name.clone();
+    let (display_name, healthz_interval_secs) = {
+        let s = state.settings.lock().unwrap();
+        (s.display_name.clone(), s.healthz_interval_secs)
+    };
     let devices = state.enrollment.list_devices().len();
     let (uploads, uploads_complete) = state.store.counts();
     Json(PublicStatus {
@@ -267,7 +272,10 @@ pub async fn public_status(State(state): State<AppState>) -> Json<PublicStatus> 
         version: crate::version::displayed(),
         started_at: state.started_at,
         uptime_secs: now.saturating_sub(state.started_at),
-        settings: PublicStatusSettings { display_name },
+        settings: PublicStatusSettings {
+            display_name,
+            healthz_interval_secs,
+        },
         devices,
         uploads,
         uploads_complete,
@@ -424,8 +432,70 @@ pub async fn patch_settings(
     Ok(Json(settings.clone()))
 }
 
+fn device_quota_json(
+    state: &AppState,
+    device: &crate::enroll::DevicePublicView,
+) -> serde_json::Value {
+    let usage = state
+        .rate_limiter
+        .device_upload_usage(&device.device_id.to_string());
+    let company_limit = if device.company_id.is_empty() {
+        None
+    } else {
+        state
+            .otp
+            .get_company(&device.company_id)
+            .map(|c| c.device_uploads_per_hour)
+    };
+    let limit = company_limit.unwrap_or_else(|| state.rate_limiter.config().device_uploads_per_hour);
+    let bypass = device.rate_limit_bypass;
+    let unlimited = !state.rate_limiter.config().enabled || limit == 0;
+    let remaining = if bypass || unlimited {
+        None
+    } else {
+        Some(limit.saturating_sub(usage.used))
+    };
+    let exhausted = !bypass && !unlimited && usage.used >= limit;
+    let state_label = if bypass {
+        "bypass"
+    } else if unlimited {
+        "unlimited"
+    } else if exhausted {
+        "exhausted"
+    } else if limit > 0 && usage.used * 100 / limit >= 80 {
+        "near"
+    } else {
+        "ok"
+    };
+    json!({
+        "used": usage.used,
+        "limit": limit,
+        "window_secs": usage.window_secs,
+        "remaining": remaining,
+        "bypass": bypass,
+        "unlimited": unlimited,
+        "exhausted": exhausted,
+        "state": state_label,
+        "retry_after_secs": if exhausted { usage.retry_after_secs } else { None::<u64> },
+    })
+}
+
+fn device_with_quota(state: &AppState, device: crate::enroll::DevicePublicView) -> serde_json::Value {
+    let mut value = serde_json::to_value(&device).unwrap_or_else(|_| json!({}));
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("quota".into(), device_quota_json(state, &device));
+    }
+    value
+}
+
 pub async fn list_devices(State(state): State<AppState>) -> Json<serde_json::Value> {
-    Json(json!({ "devices": state.enrollment.list_devices() }))
+    let devices: Vec<_> = state
+        .enrollment
+        .list_devices()
+        .into_iter()
+        .map(|d| device_with_quota(&state, d))
+        .collect();
+    Json(json!({ "devices": devices }))
 }
 
 pub async fn list_client_keys(State(state): State<AppState>) -> Json<serde_json::Value> {
@@ -976,10 +1046,14 @@ pub async fn get_company(
     let branding_root = state.data_dir.join("branding").join(&company.id);
     let versions = list_branding_versions_on_disk(&branding_root);
     let builds = list_mobile_builds_for_company(&state.data_dir, &company.id);
+    let devices_json: Vec<_> = devices
+        .into_iter()
+        .map(|d| device_with_quota(&state, d))
+        .collect();
     Ok(Json(json!({
         "ok": true,
         "company": company,
-        "devices": devices,
+        "devices": devices_json,
         "lab_keys": lab_keys,
         "tokens": tokens,
         "keys": device_keys,
@@ -1655,8 +1729,15 @@ pub async fn create_token(
     Ok(Json(json!({ "token": token, "case_id": case_id })))
 }
 
-pub async fn healthz() -> impl IntoResponse {
-    (StatusCode::OK, "ok")
+/// Liveness probe. Body stays plain `ok` for simple monitors; interval for
+/// mobile clients is advertised in `x-collectemoi-healthz-interval`.
+pub async fn healthz(State(state): State<AppState>) -> impl IntoResponse {
+    let secs = state.settings.lock().unwrap().healthz_interval_secs;
+    let mut headers = HeaderMap::new();
+    if let Ok(v) = HeaderValue::from_str(&secs.to_string()) {
+        headers.insert("x-collectemoi-healthz-interval", v);
+    }
+    (StatusCode::OK, headers, "ok")
 }
 
 fn count_dirs(dir: &PathBuf) -> usize {

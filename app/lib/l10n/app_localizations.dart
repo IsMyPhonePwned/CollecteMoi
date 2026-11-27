@@ -273,16 +273,35 @@ class AppLocalizations {
       'Start Samsung guide': 'Démarrer le guide Samsung',
       'Samsung dumpstate (no Developer options)':
           'Dumpstate Samsung (sans options développeur)',
+      'Detected Samsung phone: {phone}': 'Téléphone Samsung détecté : {phone}',
+      'This phone: {phone}': 'Cet appareil : {phone}',
       'This path uses Samsung’s dialer code to write a dumpstate to storage. You do not need Developer options or “Take bug report”.':
           'Ce parcours utilise le code du composeur Samsung pour écrire un dumpstate sur le stockage. Pas besoin des options développeur ni de « Créer un rapport de bugs ».',
+      'We try to open the SysDump menu from the app. On most phones Samsung blocks that, so you may still need to dial *#9900#.':
+          'Nous essayons d’ouvrir le menu SysDump depuis l’appli. Sur la plupart des téléphones Samsung bloque cela : vous devrez peut‑être encore composer *#9900#.',
+      'Open SysDump': 'Ouvrir SysDump',
+      'Open SysDump (*#9900#)': 'Ouvrir SysDump (*#9900#)',
+      'Opening…': 'Ouverture…',
       'Open the Phone dialer': 'Ouvrir le composeur téléphone',
       'Open the Phone / Dialer app (not this app). Type *#9900# and open the SysDump / dumpstate menu that appears. Menus differ slightly by One UI version.':
           'Ouvrez l’application Téléphone / Composeur (pas cette appli). Tapez *#9900# et ouvrez le menu SysDump / dumpstate. Les libellés varient selon la version One UI.',
+      'Tap below to try opening Samsung’s SysDump menu. If nothing opens or you see an error, open Phone and dial *#9900# yourself — menus differ slightly by One UI version.':
+          'Touchez ci‑dessous pour tenter d’ouvrir le menu SysDump Samsung. Si rien ne s’ouvre, ouvrez Téléphone et composez *#9900# vous‑même — les libellés varient selon One UI.',
       'Phone → dial *#9900#': 'Téléphone → composer *#9900#',
+      'Open SysDump or Phone → dial *#9900#':
+          'Ouvrir SysDump ou Téléphone → composer *#9900#',
       'I dialed *#9900#': 'J’ai composé *#9900#',
+      'I will dial *#9900# myself': 'Je composerai *#9900# moi‑même',
+      'Opened the Samsung SysDump menu.': 'Menu SysDump Samsung ouvert.',
+      'Samsung blocks opening SysDump from apps. The Phone dialer was opened — type *#9900# if it is not already filled, then open the menu.':
+          'Samsung empêche d’ouvrir SysDump depuis les applis. Le composeur a été ouvert — tapez *#9900# s’il n’est pas déjà rempli, puis ouvrez le menu.',
+      'Could not open SysDump from this app. Open Phone and dial *#9900# manually.':
+          'Impossible d’ouvrir SysDump depuis cette appli. Ouvrez Téléphone et composez *#9900# manuellement.',
       'Run dumpstate': 'Lancer le dumpstate',
       'In the menu, choose Run dumpstate/logcat (wording may be SysDump, Dumpstate, or similar). Wait while Samsung collects logs — keep the screen on.':
           'Dans le menu, choisissez Run dumpstate/logcat (parfois SysDump, Dumpstate…). Attendez la collecte — laissez l’écran allumé.',
+      'In the menu, choose Run dumpstate/logcat (wording may be SysDump, Dumpstate, or similar). Wait while Samsung collects logs — keep the screen on. We cannot start dumpstate automatically — only the SysDump menu itself can.':
+          'Dans le menu, choisissez Run dumpstate/logcat (parfois SysDump, Dumpstate…). Attendez la collecte — laissez l’écran allumé. Nous ne pouvons pas lancer le dumpstate automatiquement — seul le menu SysDump le peut.',
       '*#9900# → Run dumpstate/logcat': '*#9900# → Run dumpstate/logcat',
       'I started dumpstate': 'J’ai lancé le dumpstate',
       'Copy to sdcard': 'Copier vers la carte SD / stockage',
@@ -580,16 +599,35 @@ class AppLocalizations {
       'Start Samsung guide': 'Empezar guía Samsung',
       'Samsung dumpstate (no Developer options)':
           'Dumpstate Samsung (sin Opciones de desarrollador)',
+      'Detected Samsung phone: {phone}': 'Teléfono Samsung detectado: {phone}',
+      'This phone: {phone}': 'Este teléfono: {phone}',
       'This path uses Samsung’s dialer code to write a dumpstate to storage. You do not need Developer options or “Take bug report”.':
           'Este recorrido usa el código del marcador Samsung para guardar un dumpstate. No necesitas Opciones de desarrollador ni «Crear informe».',
+      'We try to open the SysDump menu from the app. On most phones Samsung blocks that, so you may still need to dial *#9900#.':
+          'Intentamos abrir el menú SysDump desde la app. En la mayoría de móviles Samsung lo bloquea: puede que aún debas marcar *#9900#.',
+      'Open SysDump': 'Abrir SysDump',
+      'Open SysDump (*#9900#)': 'Abrir SysDump (*#9900#)',
+      'Opening…': 'Abriendo…',
       'Open the Phone dialer': 'Abrir el marcador',
       'Open the Phone / Dialer app (not this app). Type *#9900# and open the SysDump / dumpstate menu that appears. Menus differ slightly by One UI version.':
           'Abre Teléfono / Marcador (no esta app). Escribe *#9900# y abre el menú SysDump / dumpstate. Los textos varían según One UI.',
+      'Tap below to try opening Samsung’s SysDump menu. If nothing opens or you see an error, open Phone and dial *#9900# yourself — menus differ slightly by One UI version.':
+          'Toca abajo para intentar abrir el menú SysDump de Samsung. Si no se abre, abre Teléfono y marca *#9900# tú mismo — los textos varían según One UI.',
       'Phone → dial *#9900#': 'Teléfono → marcar *#9900#',
+      'Open SysDump or Phone → dial *#9900#':
+          'Abrir SysDump o Teléfono → marcar *#9900#',
       'I dialed *#9900#': 'Ya marqué *#9900#',
+      'I will dial *#9900# myself': 'Marcaré *#9900# yo mismo',
+      'Opened the Samsung SysDump menu.': 'Menú SysDump de Samsung abierto.',
+      'Samsung blocks opening SysDump from apps. The Phone dialer was opened — type *#9900# if it is not already filled, then open the menu.':
+          'Samsung bloquea abrir SysDump desde apps. Se abrió el marcador — escribe *#9900# si no está relleno y abre el menú.',
+      'Could not open SysDump from this app. Open Phone and dial *#9900# manually.':
+          'No se pudo abrir SysDump desde esta app. Abre Teléfono y marca *#9900# manualmente.',
       'Run dumpstate': 'Ejecutar dumpstate',
       'In the menu, choose Run dumpstate/logcat (wording may be SysDump, Dumpstate, or similar). Wait while Samsung collects logs — keep the screen on.':
           'En el menú, elige Run dumpstate/logcat (a veces SysDump, Dumpstate…). Espera la recolección — deja la pantalla encendida.',
+      'In the menu, choose Run dumpstate/logcat (wording may be SysDump, Dumpstate, or similar). Wait while Samsung collects logs — keep the screen on. We cannot start dumpstate automatically — only the SysDump menu itself can.':
+          'En el menú, elige Run dumpstate/logcat (a veces SysDump, Dumpstate…). Espera la recolección — deja la pantalla encendida. No podemos iniciar el dumpstate automáticamente: solo el menú SysDump puede.',
       '*#9900# → Run dumpstate/logcat': '*#9900# → Run dumpstate/logcat',
       'I started dumpstate': 'Ya lancé el dumpstate',
       'Copy to sdcard': 'Copiar a sdcard / almacenamiento',

@@ -9,6 +9,7 @@ import '../../../config/tenant_config.dart';
 import '../../../l10n/app_localizations.dart';
 import '../../../models/models.dart';
 import '../../../services/bugreport_validator.dart';
+import '../../../services/device_info_service.dart';
 import '../../../services/file_bytes.dart';
 import '../../../services/platform_bridge.dart';
 import '../../../services/upload_queue.dart';
@@ -29,11 +30,15 @@ class _AndroidBugreportFlowState extends State<AndroidBugreportFlow>
   _GuidePath _path = _GuidePath.developer;
   int _step = 1;
   bool _devEnabled = false;
+  bool _detectingPhone = true;
+  bool _isSamsung = false;
+  String? _phoneSummary;
   DateTime? _waitStarted;
   String? _receivedPath;
   Uint8List? _pickedBytes;
   String? _validationHint;
   bool _picking = false;
+  bool _openingSysDump = false;
 
   int get _total => _path == _GuidePath.samsung ? 6 : 7;
 
@@ -41,6 +46,7 @@ class _AndroidBugreportFlowState extends State<AndroidBugreportFlow>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _detectPhoneAndPath();
     _refreshDevState();
     _pullPending();
     _bridge.shareEvents.listen((event) {
@@ -55,6 +61,25 @@ class _AndroidBugreportFlowState extends State<AndroidBugreportFlow>
         });
       }
     });
+  }
+
+  Future<void> _detectPhoneAndPath() async {
+    try {
+      final info = await DeviceInfoService.capture();
+      if (!mounted) return;
+      setState(() {
+        _isSamsung = info.isSamsung;
+        _phoneSummary = info.summary;
+        _detectingPhone = false;
+        if (info.isSamsung) {
+          _path = _GuidePath.samsung;
+          _step = 1;
+        }
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _detectingPhone = false);
+    }
   }
 
   @override
@@ -226,7 +251,8 @@ class _AndroidBugreportFlowState extends State<AndroidBugreportFlow>
       case 1:
         setState(() => _step = 2);
       case 2:
-        // User opens Phone app and dials; we cannot open the secret code for them.
+        await _openSamsungSysDump();
+        if (!mounted) return;
         setState(() => _step = 3);
       case 3:
         setState(() {
@@ -246,6 +272,27 @@ class _AndroidBugreportFlowState extends State<AndroidBugreportFlow>
     }
   }
 
+  Future<void> _openSamsungSysDump() async {
+    if (_openingSysDump) return;
+    setState(() => _openingSysDump = true);
+    try {
+      final result = await _bridge.openSamsungSysDump();
+      if (!mounted) return;
+      final message = switch (result) {
+        'sysdump' => context.tr('Opened the Samsung SysDump menu.'),
+        'dialer' => context.tr(
+          'Samsung blocks opening SysDump from apps. The Phone dialer was opened — type *#9900# if it is not already filled, then open the menu.',
+        ),
+        _ => context.tr(
+          'Could not open SysDump from this app. Open Phone and dial *#9900# manually.',
+        ),
+      };
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    } finally {
+      if (mounted) setState(() => _openingSysDump = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     context.watch<TenantConfig>();
@@ -260,7 +307,7 @@ class _AndroidBugreportFlowState extends State<AndroidBugreportFlow>
       step: _step,
       totalSteps: _total,
       primaryLabel: _primaryLabel(context),
-      onPrimary: _picking ? null : _continue,
+      onPrimary: (_picking || _openingSysDump || _detectingPhone) ? null : _continue,
       secondaryLabel: _secondaryLabel(context),
       onSecondary: _secondaryAction(),
       child: _path == _GuidePath.samsung
@@ -273,7 +320,9 @@ class _AndroidBugreportFlowState extends State<AndroidBugreportFlow>
     if (_path == _GuidePath.samsung) {
       return switch (_step) {
         1 => context.tr('Start Samsung guide'),
-        2 => context.tr('I dialed *#9900#'),
+        2 => _openingSysDump
+            ? context.tr('Opening…')
+            : context.tr('Open SysDump (*#9900#)'),
         3 => context.tr('I started dumpstate'),
         4 => context.tr('Copy to sdcard finished'),
         5 => _receivedPath == null
@@ -302,6 +351,9 @@ class _AndroidBugreportFlowState extends State<AndroidBugreportFlow>
       if (_step == 1) {
         return context.tr('Use Developer options instead');
       }
+      if (_step == 2) {
+        return context.tr('I will dial *#9900# myself');
+      }
       if (_step == 5 && _receivedPath != null) {
         return context.tr('Choose a different dumpstate');
       }
@@ -321,6 +373,9 @@ class _AndroidBugreportFlowState extends State<AndroidBugreportFlow>
   VoidCallback? _secondaryAction() {
     if (_path == _GuidePath.samsung) {
       if (_step == 1) return _startDeveloperGuide;
+      if (_step == 2) {
+        return () => setState(() => _step = 3);
+      }
       if (_step == 5 && _receivedPath != null) {
         return _picking ? null : _pickDumpstateOrBugreport;
       }
@@ -338,9 +393,16 @@ class _AndroidBugreportFlowState extends State<AndroidBugreportFlow>
     return switch (_step) {
       1 => GuideBody(
           headline: guide.headline,
-          body:
-              '${guide.body}\n\n'
-              '${context.tr('On Samsung phones without Developer options, use the Samsung dumpstate guide instead.')}',
+          body: [
+            if (_phoneSummary != null && _phoneSummary!.isNotEmpty)
+              context
+                  .tr('This phone: {phone}')
+                  .replaceAll('{phone}', _phoneSummary!),
+            guide.body,
+            context.tr(
+              'On Samsung phones without Developer options, use the Samsung dumpstate guide instead.',
+            ),
+          ].join('\n\n'),
         ),
       2 => GuideBody(
           headline: context.tr('Enable Developer options'),
@@ -394,12 +456,27 @@ class _AndroidBugreportFlowState extends State<AndroidBugreportFlow>
   }
 
   Widget _samsungBody(BuildContext context) {
+    final detected = _isSamsung
+        ? context
+            .tr('Detected Samsung phone: {phone}')
+            .replaceAll('{phone}', _phoneSummary ?? 'Samsung')
+        : (_phoneSummary == null
+            ? null
+            : context
+                .tr('This phone: {phone}')
+                .replaceAll('{phone}', _phoneSummary!));
     return switch (_step) {
       1 => GuideBody(
           headline: context.tr('Samsung dumpstate (no Developer options)'),
-          body: context.tr(
-            'This path uses Samsung’s dialer code to write a dumpstate to storage. You do not need Developer options or “Take bug report”.',
-          ),
+          body: [
+            if (detected != null) detected,
+            context.tr(
+              'This path uses Samsung’s dialer code to write a dumpstate to storage. You do not need Developer options or “Take bug report”.',
+            ),
+            context.tr(
+              'We try to open the SysDump menu from the app. On most phones Samsung blocks that, so you may still need to dial *#9900#.',
+            ),
+          ].join('\n\n'),
           illustration: _HintCard(
             icon: Icons.dialpad,
             text: context.tr(
@@ -408,19 +485,19 @@ class _AndroidBugreportFlowState extends State<AndroidBugreportFlow>
           ),
         ),
       2 => GuideBody(
-          headline: context.tr('Open the Phone dialer'),
+          headline: context.tr('Open SysDump'),
           body: context.tr(
-            'Open the Phone / Dialer app (not this app). Type *#9900# and open the SysDump / dumpstate menu that appears. Menus differ slightly by One UI version.',
+            'Tap below to try opening Samsung’s SysDump menu. If nothing opens or you see an error, open Phone and dial *#9900# yourself — menus differ slightly by One UI version.',
           ),
           illustration: _HintCard(
             icon: Icons.phone_in_talk_outlined,
-            text: context.tr('Phone → dial *#9900#'),
+            text: context.tr('Open SysDump or Phone → dial *#9900#'),
           ),
         ),
       3 => GuideBody(
           headline: context.tr('Run dumpstate'),
           body: context.tr(
-            'In the menu, choose Run dumpstate/logcat (wording may be SysDump, Dumpstate, or similar). Wait while Samsung collects logs — keep the screen on.',
+            'In the menu, choose Run dumpstate/logcat (wording may be SysDump, Dumpstate, or similar). Wait while Samsung collects logs — keep the screen on. We cannot start dumpstate automatically — only the SysDump menu itself can.',
           ),
           illustration: _HintCard(
             icon: Icons.bug_report_outlined,

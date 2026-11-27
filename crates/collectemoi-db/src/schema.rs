@@ -60,7 +60,9 @@ CREATE TABLE IF NOT EXISTS devices (
     details_json TEXT NOT NULL DEFAULT '',
     last_seen_at TEXT NOT NULL DEFAULT '',
     -- When set, this device ignores the company upload-per-hour quota.
-    rate_limit_bypass INTEGER NOT NULL DEFAULT 0
+    rate_limit_bypass INTEGER NOT NULL DEFAULT 0,
+    -- JSON array of previous public keys / noise fingerprints after rebind.
+    key_history_json TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE INDEX IF NOT EXISTS idx_devices_public_key ON devices(public_key);

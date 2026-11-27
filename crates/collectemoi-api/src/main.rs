@@ -323,6 +323,7 @@ async fn main() -> anyhow::Result<()> {
         lab_reveal_otp: args.lab_reveal_otp,
         otp_delivery_webhook_url: args.otp_delivery_webhook_url.clone(),
         otp_delivery_webhook_token: args.otp_delivery_webhook_token.clone(),
+        healthz_interval_secs: settings::DEFAULT_HEALTHZ_INTERVAL_SECS,
     };
     // Overlay lab toggles saved from the admin console so restart keeps them.
     if let Some(persisted) = settings::load_persisted(&db) {

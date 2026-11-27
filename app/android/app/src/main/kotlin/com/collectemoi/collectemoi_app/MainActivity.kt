@@ -1,6 +1,7 @@
 package com.collectemoi.collectemoi_app
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -43,6 +44,9 @@ class MainActivity : FlutterActivity() {
                     "openDeveloperSettings" -> {
                         startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
                         result.success(null)
+                    }
+                    "openSamsungSysDump" -> {
+                        result.success(openSamsungSysDump())
                     }
                     "pendingShareJobs" -> {
                         val list = ArrayList<Map<String, Any?>>()
@@ -110,6 +114,94 @@ class MainActivity : FlutterActivity() {
             arrayOf(Manifest.permission.POST_NOTIFICATIONS),
             notifPermissionRequest,
         )
+    }
+
+    /**
+     * Best-effort open of Samsung SysDump (*#9900#).
+     *
+     * Direct start of SysDump is usually blocked for third-party apps
+     * (signatureOrSystem KEYSTRING). We still try, then fall back to the dialer
+     * with the secret code prefilled. Returns: sysdump | dialer | failed.
+     */
+    private fun openSamsungSysDump(): String {
+        val components = listOf(
+            ComponentName(
+                "com.sec.android.app.servicemodeapp",
+                "com.sec.android.app.servicemodeapp.SysDump",
+            ),
+            ComponentName(
+                "com.sec.android.app.servicemodeapp",
+                "com.sec.android.app.servicemodeapp.ServiceModeApp",
+            ),
+        )
+        for (component in components) {
+            try {
+                // Do not rely on resolveActivity — protected components may not
+                // resolve for third-party apps even when present.
+                startActivity(
+                    Intent(Intent.ACTION_MAIN)
+                        .setComponent(component)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+                return "sysdump"
+            } catch (_: SecurityException) {
+                // Expected on modern One UI — SysDump is signature-protected.
+            } catch (_: Exception) {
+                // Try next candidate / fallback.
+            }
+        }
+
+        // SECRET_CODE broadcast (same path as dialing *#9900#) — usually also
+        // gated, but harmless to attempt.
+        try {
+            val secret = Intent("android.provider.Telephony.SECRET_CODE").apply {
+                data = Uri.parse("android_secret_code://9900")
+            }
+            sendBroadcast(secret)
+        } catch (_: Exception) {
+            // ignore
+        }
+
+        // Dialer with the code prefilled — user still confirms / finishes dial.
+        return if (openDialerWithSecretCode("*#9900#")) "dialer" else "failed"
+    }
+
+    private fun openDialerWithSecretCode(code: String): Boolean {
+        val encoded = Uri.encode(code)
+        val telEncoded = Uri.parse("tel:$encoded")
+        val telParts = Uri.fromParts("tel", code, null)
+        val dialerPackages = listOf(
+            "com.samsung.android.dialer",
+            "com.samsung.android.contacts",
+            "com.android.phone",
+            "com.android.contacts",
+            "com.google.android.dialer",
+        )
+
+        val candidates = ArrayList<Intent>()
+        // Prefer Samsung Phone when present so *#9900# can trigger SysDump.
+        for (pkg in dialerPackages) {
+            candidates.add(
+                Intent(Intent.ACTION_DIAL, telEncoded).setPackage(pkg),
+            )
+            candidates.add(
+                Intent(Intent.ACTION_DIAL).setData(telParts).setPackage(pkg),
+            )
+        }
+        candidates.add(Intent(Intent.ACTION_DIAL, telEncoded))
+        candidates.add(Intent(Intent.ACTION_VIEW, telEncoded))
+        candidates.add(Intent(Intent.ACTION_DIAL).setData(telParts))
+
+        for (intent in candidates) {
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(intent)
+                return true
+            } catch (_: Exception) {
+                // try next package / URI form
+            }
+        }
+        return false
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

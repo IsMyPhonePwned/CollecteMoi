@@ -2497,6 +2497,214 @@
       box-shadow: inset 3px 0 0 var(--accent);
       background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
     }
+    /* Devices table: dedicated columns for phone / check-in / blobs */
+    .devices-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem 0.85rem;
+      margin: 0 0 0.85rem;
+      padding: 0.65rem 0.85rem;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--bg-panel);
+      align-items: center;
+    }
+    .devices-summary .stat {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 0.35rem;
+      font-size: 0.8rem;
+      color: var(--ink-dim);
+    }
+    .devices-summary .stat .n {
+      font-family: var(--mono);
+      font-weight: 650;
+      font-size: 0.95rem;
+      color: var(--ink);
+      font-variant-numeric: tabular-nums;
+    }
+    .devices-summary .stat.online .n { color: var(--ok, #3ecf8e); }
+    .devices-summary .stat.idle .n { color: var(--warn, #e6b84d); }
+    .devices-summary .stat.banned .n { color: var(--bad, #f07178); }
+    .devices-summary .sep {
+      width: 1px;
+      height: 1.1rem;
+      background: var(--line);
+      margin: 0 0.15rem;
+    }
+    .expand-list.devices-list .expand-summary.device-row,
+    .expand-list.devices-list .expand-list-head.device-head {
+      grid-template-columns:
+        1.15rem
+        minmax(8rem, 1.05fr)
+        minmax(7.5rem, 1.1fr)
+        7.5rem
+        6.5rem
+        5.75rem
+        3.2rem
+        5.75rem
+        11rem;
+      padding-top: 0.55rem;
+      padding-bottom: 0.55rem;
+    }
+    .expand-list.devices-list .expand-list-head.device-head span:nth-child(5),
+    .expand-list.devices-list .expand-list-head.device-head span:nth-child(6),
+    .expand-list.devices-list .expand-list-head.device-head span:nth-child(7) {
+      text-align: right;
+    }
+    .expand-list.devices-list .expand-list-head.device-head span:nth-child(9) {
+      text-align: right;
+    }
+    .device-quota {
+      min-width: 0;
+      text-align: right;
+      display: flex;
+      flex-direction: column;
+      gap: 0.08rem;
+      align-items: flex-end;
+    }
+    .device-quota .usage {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      font-weight: 650;
+      font-variant-numeric: tabular-nums;
+      color: var(--ink);
+    }
+    .device-quota .usage.near { color: var(--warn, #e6b84d); }
+    .device-quota .usage.exhausted { color: var(--bad, #f07178); }
+    .device-quota .usage.bypass,
+    .device-quota .usage.unlimited { color: var(--ink-faint); font-weight: 550; }
+    .device-quota .qstate {
+      font-size: 0.65rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--ink-faint);
+    }
+    .device-quota .qstate.ok { color: var(--ok, #3ecf8e); }
+    .device-quota .qstate.near { color: var(--warn, #e6b84d); }
+    .device-quota .qstate.exhausted { color: var(--bad, #f07178); }
+    .device-quota .qstate.bypass { color: var(--accent); }
+    .device-phone {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+    }
+    .device-phone .model {
+      font-weight: 600;
+      font-size: 0.84rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .device-phone .os {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--ink-faint);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .device-phone .patch,
+    .device-phone .build,
+    .device-phone .states {
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--ink-dim);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .device-phone .patch.missing,
+    .device-phone .build.missing {
+      font-weight: 500;
+      color: var(--ink-faint);
+      font-style: italic;
+    }
+    .device-phone .states {
+      font-weight: 550;
+      color: var(--ink-faint);
+    }
+    .prior-key {
+      padding: 0.55rem 0;
+      border-top: 1px solid var(--line);
+    }
+    .prior-key:first-of-type { border-top: 0; padding-top: 0; }
+    .prior-key .label {
+      font-size: 0.78rem;
+      font-weight: 650;
+      color: var(--ink);
+    }
+    .prior-key .meta {
+      font-size: 0.72rem;
+      color: var(--ink-dim);
+      margin-top: 0.15rem;
+    }
+    .prior-key .detail-dl { margin-top: 0.35rem; }
+    .device-checkin {
+      min-width: 0;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      display: flex;
+      flex-direction: column;
+      gap: 0.08rem;
+      align-items: flex-end;
+    }
+    .device-checkin .age {
+      font-weight: 650;
+      font-size: 0.82rem;
+      color: var(--ink);
+    }
+    .device-checkin .age.online { color: var(--ok, #3ecf8e); }
+    .device-checkin .age.idle { color: var(--warn, #e6b84d); }
+    .device-checkin .age.never,
+    .device-checkin .age.offline { color: var(--ink-faint); }
+    .device-checkin .when {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--ink-faint);
+      white-space: nowrap;
+    }
+    .device-blobs {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: var(--ink-dim);
+    }
+    .device-blobs.has { color: var(--ink); font-weight: 600; }
+    .expand-list.devices-list .expand-status {
+      justify-content: stretch;
+    }
+    .expand-list.devices-list .expand-status .pill {
+      width: 100%;
+    }
+    .expand-row.device-online {
+      box-shadow: inset 3px 0 0 color-mix(in srgb, var(--ok, #3ecf8e) 75%, transparent);
+    }
+    .expand-row.device-banned {
+      box-shadow: inset 3px 0 0 color-mix(in srgb, var(--bad, #f07178) 80%, transparent);
+      opacity: 0.92;
+    }
+
+    @media (max-width: 1380px) {
+      .expand-list.devices-list .expand-summary.device-row,
+      .expand-list.devices-list .expand-list-head.device-head {
+        grid-template-columns:
+          1.15rem
+          minmax(8rem, 1.05fr)
+          minmax(7rem, 1fr)
+          7rem
+          6rem
+          5.5rem
+          5.75rem
+          10.5rem;
+      }
+      .expand-list.devices-list .device-blobs,
+      .expand-list.devices-list .h-blobs { display: none; }
+    }
     @media (max-width: 1180px) {
       .expand-summary.with-company,
       .expand-list-head {
@@ -2509,6 +2717,21 @@
       }
       .expand-summary.with-company .expand-status,
       .expand-list-head .h-status { display: none; }
+      .expand-list.devices-list .expand-summary.device-row,
+      .expand-list.devices-list .expand-list-head.device-head {
+        grid-template-columns:
+          1.15rem
+          minmax(0, 1fr)
+          minmax(6.5rem, 0.9fr)
+          5.5rem
+          10.5rem;
+      }
+      .expand-list.devices-list .expand-company,
+      .expand-list.devices-list .h-company,
+      .expand-list.devices-list .device-checkin,
+      .expand-list.devices-list .h-checkin,
+      .expand-list.devices-list .expand-status,
+      .expand-list.devices-list .h-status { display: none; }
     }
     @media (max-width: 800px) {
       .expand-list-head { display: none; }
@@ -2530,6 +2753,20 @@
       .expand-summary.with-company .expand-actions { grid-column: 3; grid-row: 1 / span 2; }
       .expand-side,
       .expand-status { display: none; }
+      .expand-list.devices-list .expand-summary.device-row {
+        grid-template-columns: 1.15rem minmax(0, 1fr) auto;
+      }
+      .expand-list.devices-list .device-phone {
+        grid-column: 2;
+        grid-row: 2;
+      }
+      .expand-list.devices-list .device-checkin,
+      .expand-list.devices-list .device-quota,
+      .expand-list.devices-list .device-blobs,
+      .expand-list.devices-list .expand-company,
+      .expand-list.devices-list .expand-status { display: none; }
+      .expand-list.devices-list .expand-main { grid-column: 2; grid-row: 1; }
+      .expand-list.devices-list .expand-actions { grid-column: 3; grid-row: 1 / span 2; }
       .expand-actions { flex-wrap: wrap; width: auto; }
       .detail-dl { grid-template-columns: 1fr; }
       .detail-dl .copy-cell { justify-content: flex-start; }
@@ -3121,13 +3358,15 @@
         <div class="panel-head">
           <div>
             <h2>Devices</h2>
-            <p>Enrolled devices by company — click a row for keys and blobs.</p>
+            <p>Enrolled phones — one active identity per email by default. Wipe/reinstall rebinds the same row; banned history is under Presence → Banned.</p>
           </div>
           <div class="toolbar">
-            <input class="search" id="search-devices" type="search" placeholder="Filter devices / company…" />
+            <input class="search" id="search-devices" type="search" placeholder="Filter email, model, id, company…" />
           </div>
         </div>
+        <div class="devices-summary" id="devices-summary" hidden></div>
         <div class="filter-chips" id="devices-company-filter" aria-label="Filter devices by company"></div>
+        <div class="filter-chips" id="devices-status-filter" aria-label="Filter devices by presence"></div>
         <div id="devices"></div>
       </section>
 
@@ -3417,7 +3656,7 @@
         <div class="panel-head">
           <div>
             <h2>Keys &amp; bans</h2>
-            <p>Ban client public keys to block enroll and upload. Noise secrets are never shown.</p>
+            <p>Ban client public keys to block enroll and upload. Each ban links to matching device identities when known.</p>
           </div>
           <div class="toolbar">
             <input class="search" id="search-keys" type="search" placeholder="Filter banned keys…" />
@@ -4087,6 +4326,14 @@
               <label><input name="lab_seal" type="checkbox" /> Lab seal</label>
               <label><input name="allow_dev_envelope" type="checkbox" /> Allow CMDEV</label>
             </div>
+            <label>Healthz poll (seconds)
+              <input name="healthz_interval_secs" type="number" min="15" max="3600" step="1" value="60" required title="How often enrolled apps call GET /healthz (device check-in). Default 60." />
+            </label>
+            <p class="meta-line" style="grid-column:1 / -1;margin:-0.35rem 0 0">
+              Mobile apps poll <span class="mono">GET /healthz</span> on this interval (15–3600s, default 60).
+              The value is returned in <span class="mono">x-collectemoi-healthz-interval</span> so phones pick it up without restart.
+              Devices tab treats a phone as <strong>online</strong> if seen within about twice this interval.
+            </p>
             <label style="grid-column:1 / -1">OTP delivery webhook URL
               <input name="otp_delivery_webhook_url" type="url" placeholder="https://mail.example/hooks/collectemoi-otp" autocomplete="off" />
             </label>
@@ -4317,6 +4564,8 @@
         logs: "",
         settings: "",
         devicesCompany: "",
+        devicesStatus: "active",
+        companyDevicesShowBanned: false,
         blobsCompany: "",
       },
       selectedCompanyId: null,
@@ -4369,6 +4618,227 @@
       if (!d) return "—";
       const iso = d.toISOString();
       return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
+    }
+
+    /** Relative age for device check-ins (healthz / API touch). */
+    function formatAge(value) {
+      const d = parseDate(value);
+      if (!d) return "";
+      const sec = Math.max(0, Math.round((Date.now() - d.getTime()) / 1000));
+      if (sec < 45) return "just now";
+      if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
+      if (sec < 86400) return `${Math.round(sec / 3600)}h ago`;
+      return `${Math.round(sec / 86400)}d ago`;
+    }
+
+    /** Configured mobile /healthz poll interval (Settings), default 60s. */
+    function healthzIntervalSecs() {
+      const n = Number(state.cache?.overview?.settings?.healthz_interval_secs);
+      if (Number.isFinite(n) && n >= 15) return Math.min(3600, Math.round(n));
+      return 60;
+    }
+
+    /** Online ≈ within 2× poll interval (+30s grace); idle within 1 hour. */
+    function deviceCheckIn(d) {
+      const raw = d?.last_seen_at || "";
+      const when = parseDate(raw);
+      const ageSec = when ? Math.max(0, (Date.now() - when.getTime()) / 1000) : null;
+      const onlineWithin = Math.max(120, healthzIntervalSecs() * 2 + 30);
+      const online = ageSec != null && ageSec <= onlineWithin;
+      const recent = ageSec != null && ageSec <= 3600;
+      const presence = !raw ? "never" : online ? "online" : recent ? "idle" : "offline";
+      const label = raw
+        ? `${formatTs(raw)}${formatAge(raw) ? ` · ${formatAge(raw)}` : ""}`
+        : "—";
+      const pill = presence === "never"
+        ? `<span class="pill warn">never</span>`
+        : presence === "online"
+          ? `<span class="pill ok">online</span>`
+          : presence === "idle"
+            ? `<span class="pill warn">idle</span>`
+            : `<span class="pill">offline</span>`;
+      return { raw, when, online, recent, presence, label, pill, ageSec, onlineWithin };
+    }
+
+    function devicePresenceKey(d) {
+      if (d?.banned || d?.public_key_banned) return "banned";
+      return deviceCheckIn(d).presence;
+    }
+
+    function deviceIsBanned(d) {
+      return !!(d?.banned || d?.public_key_banned);
+    }
+
+    /** Presence chip filter: "active" = any non-banned presence. */
+    function deviceMatchesStatusFilter(d, stFilter) {
+      if (!stFilter) return true;
+      if (stFilter === "active") return !deviceIsBanned(d);
+      return devicePresenceKey(d) === stFilter;
+    }
+
+    /**
+     * Prefer one row per email: keep active identities; drop banned siblings when
+     * an active device already owns that email (stale ban-then-reenroll leftovers).
+     * When filtering Banned / All, keep everything.
+     */
+    function collapseStaleEmailDuplicates(list, stFilter) {
+      if (stFilter === "banned" || stFilter === "") return list || [];
+      const groups = new Map();
+      for (const d of list || []) {
+        const email = String(d?.email || "").trim().toLowerCase();
+        const key = email || `id:${d.device_id}`;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(d);
+      }
+      const out = [];
+      for (const rows of groups.values()) {
+        const active = rows.filter((d) => !deviceIsBanned(d));
+        if (active.length) out.push(...active);
+        else out.push(...rows);
+      }
+      return out;
+    }
+
+    function deviceKeyHistory(d) {
+      return Array.isArray(d?.key_history) ? d.key_history : [];
+    }
+
+    /** Other device rows for the same email (from full cache, including banned). */
+    function priorDevicesForEmail(d, all) {
+      const email = String(d?.email || "").trim().toLowerCase();
+      if (!email) return [];
+      return (all || [])
+        .filter((x) => x.device_id !== d.device_id && String(x.email || "").trim().toLowerCase() === email)
+        .sort((a, b) => String(b.last_seen_at || b.enrolled_at || "").localeCompare(String(a.last_seen_at || a.enrolled_at || "")));
+    }
+
+    function devicePreviousCount(d, all) {
+      return deviceKeyHistory(d).length + priorDevicesForEmail(d, all).length;
+    }
+
+    function deviceKeyHistoryHtml(d, all) {
+      const hist = deviceKeyHistory(d).slice().reverse();
+      const priors = priorDevicesForEmail(d, all);
+      if (!hist.length && !priors.length) {
+        return `<div class="card" style="margin-top:0.85rem">
+          <div class="card-title"><h3>Previous keys</h3><span class="hint">none yet</span></div>
+          <span class="empty">No prior keys or superseded enrollments for this email.</span>
+        </div>`;
+      }
+      const histRows = hist.map((h) => {
+        const when = h.replaced_at ? formatTs(h.replaced_at) : "—";
+        const phone = [h.platform, h.model].filter(Boolean).join(" / ") || "—";
+        const fp = h.noise_key_fingerprint ? short(h.noise_key_fingerprint, 18) : "—";
+        return `<div class="prior-key">
+          <div class="label">${esc(h.reason || "previous key")} · ${esc(when)}</div>
+          <div class="meta mono" title="${esc(h.public_key || "")}">pk ${esc(short(h.public_key, 20))} · noise ${esc(fp)}${h.from_device_id ? ` · from ${esc(short(h.from_device_id, 14))}` : ""}</div>
+          <div class="meta">${esc(phone)}${h.app_version ? ` · app ${esc(h.app_version)}` : ""}${h.enrolled_at ? ` · enrolled ${esc(formatTsShort(h.enrolled_at))}` : ""}</div>
+          <dl class="detail-dl">
+            ${h.public_key ? fieldRow("Public key", h.public_key, true) : ""}
+            ${h.noise_key_fingerprint ? fieldRow("Noise fingerprint", h.noise_key_fingerprint, true) : ""}
+          </dl>
+        </div>`;
+      }).join("");
+      const priorRows = priors.map((p) => {
+        const banned = deviceIsBanned(p);
+        return `<div class="prior-key">
+          <div class="label">${banned ? "superseded / banned row" : "other enrollment"} · ${esc(formatTs(p.last_seen_at || p.enrolled_at))}</div>
+          <div class="meta mono" title="${esc(p.device_id)}">${deviceLink(p.device_id)} · pk ${esc(short(p.public_key, 20))}${p.noise_key_fingerprint ? ` · noise ${esc(short(p.noise_key_fingerprint, 18))}` : ""}</div>
+          <div class="meta">${esc(deviceHardwareMeta(p))}${p.app_version ? ` · app ${esc(p.app_version)}` : ""}</div>
+          <dl class="detail-dl">
+            ${fieldRow("Public key", p.public_key || "—", !!p.public_key)}
+            ${p.noise_key_fingerprint ? fieldRow("Noise fingerprint", p.noise_key_fingerprint, true) : ""}
+          </dl>
+        </div>`;
+      }).join("");
+      return `<div class="card" style="margin-top:0.85rem">
+        <div class="card-title"><h3>Previous keys</h3><span class="hint">${esc(hist.length + priors.length)} retained</span></div>
+        ${histRows}${priorRows}
+      </div>`;
+    }
+
+    function devicePhoneLabel(d) {
+      const maker = d?.manufacturer || d?.brand || "";
+      const model = d?.model || d?.device_name || "";
+      if (maker && model) {
+        if (model.toLowerCase().startsWith(String(maker).toLowerCase())) return model;
+        return `${maker} ${model}`;
+      }
+      return model || maker || d?.platform || "Unknown phone";
+    }
+
+    function deviceSecurityPatch(d) {
+      const top = String(d?.security_patch || "").trim();
+      if (top) return top;
+      return deviceDetailValue(d, "security_patch");
+    }
+
+    function deviceApiLevel(d) {
+      const top = String(d?.api_level || "").trim();
+      if (top) return top;
+      return deviceDetailValue(d, "api_level", "sdk");
+    }
+
+    /** Upload-session quota from API (`quota` on each device). */
+    function deviceQuota(d) {
+      const q = d?.quota || {};
+      const used = Number(q.used) || 0;
+      const limit = Number(q.limit);
+      const bypass = !!(q.bypass || d?.rate_limit_bypass);
+      const unlimited = !!q.unlimited || (!bypass && (limit === 0 || !Number.isFinite(limit)));
+      const state = bypass
+        ? "bypass"
+        : (q.state || (unlimited ? "unlimited" : "ok"));
+      const remaining = q.remaining == null ? null : Number(q.remaining);
+      const windowSecs = Number(q.window_secs) || 3600;
+      const retryAfter = q.retry_after_secs == null ? null : Number(q.retry_after_secs);
+      const usageLabel = bypass
+        ? "bypass"
+        : unlimited
+          ? `${used} / ∞`
+          : `${used} / ${limit}`;
+      const stateLabel = ({
+        ok: "ok",
+        near: "near limit",
+        exhausted: "exhausted",
+        bypass: "bypass",
+        unlimited: "unlimited",
+      })[state] || state;
+      const title = [
+        bypass ? "This device bypasses the company upload quota" : null,
+        unlimited && !bypass ? "Company quota is unlimited (0) or rate limits are off" : null,
+        !bypass && !unlimited ? `${used} of ${limit} upload sessions in the last ${Math.round(windowSecs / 60)} min` : null,
+        remaining != null ? `${remaining} remaining` : null,
+        retryAfter != null && state === "exhausted" ? `Retry in ~${retryAfter}s` : null,
+      ].filter(Boolean).join("\n");
+      return { used, limit, bypass, unlimited, state, stateLabel, usageLabel, remaining, windowSecs, retryAfter, title };
+    }
+
+    function deviceOsLabel(d) {
+      const bits = [];
+      const release = deviceAndroidRelease(d);
+      if (release) bits.push(`Android ${release}`);
+      else if (d?.platform) bits.push(d.platform);
+      if (d?.os_version && !release) bits.push(d.os_version);
+      const api = deviceApiLevel(d);
+      if (api && !bits.some((b) => b.includes(`API ${api}`))) bits.push(`API ${api}`);
+      if (d?.app_version) bits.push(`app ${d.app_version}`);
+      return bits.join(" · ") || "—";
+    }
+
+    function deviceStatesLabel(d) {
+      const bits = [];
+      const phys = devicePhysicalState(d);
+      if (phys === "emulator") bits.push("emulator");
+      else if (phys === "yes") bits.push("physical");
+      const btype = deviceBuildType(d);
+      if (btype) bits.push(btype);
+      const low = deviceLowRamState(d);
+      if (low === "yes") bits.push("low-RAM");
+      const free = deviceDetailValue(d, "disk_free_mb");
+      const freeHuman = formatDiskMb(free);
+      if (freeHuman) bits.push(`${freeHuman} free`);
+      return bits.join(" · ");
     }
 
     /** Human size: 44767134 → "42.7 MB (44,767,134 B)" */
@@ -4512,14 +4982,14 @@
             <path class="line-tx" d="${txLine}"></path>
           </svg>
           <div class="dash-net-legend">
-            <span class="rx"><i></i>RX ${esc(formatRate(rxNow))}</span>
-            <span class="tx"><i></i>TX ${esc(formatRate(txNow))}</span>
-            <span>total ↓${esc(formatBytes(bw?.rx_total ?? 0, { compact: true }))} ↑${esc(formatBytes(bw?.tx_total ?? 0, { compact: true }))}</span>
+            <span class="rx"><i></i>In ${esc(formatRate(rxNow))}</span>
+            <span class="tx"><i></i>Out ${esc(formatRate(txNow))}</span>
+            <span>devices only · total ↓${esc(formatBytes(bw?.rx_total ?? 0, { compact: true }))} ↑${esc(formatBytes(bw?.tx_total ?? 0, { compact: true }))}</span>
           </div>
         </div>
         <div class="dash-net-stats">
-          <div class="dash-net-stat"><span class="k">Download</span><span class="v rx">↓ ${esc(formatRate(rxNow))}</span></div>
-          <div class="dash-net-stat"><span class="k">Upload</span><span class="v tx">↑ ${esc(formatRate(txNow))}</span></div>
+          <div class="dash-net-stat" title="HTTP bodies into the API from devices (chunk uploads, enroll, …). Admin UI traffic is excluded."><span class="k">From devices</span><span class="v rx">↓ ${esc(formatRate(rxNow))}</span></div>
+          <div class="dash-net-stat" title="HTTP bodies out to devices. Admin UI / analyst polls are excluded."><span class="k">To devices</span><span class="v tx">↑ ${esc(formatRate(txNow))}</span></div>
           <div class="dash-net-stat"><span class="k">Peak (window)</span><span class="v">${esc(formatRate(peak))}</span></div>
           <a class="btn sm ghost" href="#apiaccess">API access →</a>
         </div>`;
@@ -5080,6 +5550,7 @@
         const kind = name === "devices" ? "device" : name === "blobs" ? "blob" : name;
         if (name === "devices" || name === "blobs") {
           state.expanded.add(expandKey(kind, id));
+          if (name === "devices") ensureDeviceVisibleInFilter(id);
           if (state.cache.ready) {
             if (name === "devices") renderDevices(state.cache.devices || []);
             if (name === "blobs") renderBlobs(state.cache.blobs || []);
@@ -5089,6 +5560,22 @@
           }
         }
       }
+    }
+
+    /** When deep-linking to a device, relax Active filter so banned/history rows can open. */
+    function ensureDeviceVisibleInFilter(deviceId) {
+      const d = knownDevice(deviceId);
+      if (!d) {
+        if (state.filter.devicesStatus === "active") state.filter.devicesStatus = "";
+        return;
+      }
+      const st = state.filter.devicesStatus || "";
+      if (!st || st === "active") {
+        if (deviceIsBanned(d)) state.filter.devicesStatus = "banned";
+        return;
+      }
+      if (st === "banned" && !deviceIsBanned(d)) state.filter.devicesStatus = "active";
+      else if (st !== "banned" && devicePresenceKey(d) !== st) state.filter.devicesStatus = deviceIsBanned(d) ? "banned" : "active";
     }
 
     function navigateTo(tab, id) {
@@ -5181,11 +5668,13 @@
       api_level: "API level",
       sdk: "Android SDK",
       android_release: "Android release",
+      android_build: "Android build",
       build_incremental: "Build incremental",
       build_id: "Build ID",
       build_display: "Build display",
       build_type: "Build type",
       build_tags: "Build tags",
+      build_time: "Build time (epoch ms)",
       build_host: "Build host",
       base_os: "Base OS",
       codename: "Codename",
@@ -5194,8 +5683,14 @@
       bootloader: "Bootloader",
       hardware: "Hardware",
       product: "Product",
+      device_codename: "Device codename",
       abis: "ABIs",
       physical: "Physical device",
+      low_ram: "Low-RAM device",
+      ram_mb: "RAM (MB)",
+      ram_avail_mb: "RAM available (MB)",
+      disk_total_mb: "Disk total (MB)",
+      disk_free_mb: "Disk free (MB)",
       system: "OS name",
       ios_version: "iOS version",
       model_id: "Model id",
@@ -5209,29 +5704,91 @@
       language: "Language",
     };
 
-    /** Highlighted OS / patch rows + remaining details_json keys. */
+    function deviceBuildDisplay(d) {
+      const top = String(d?.build_display || "").trim();
+      if (top) return top;
+      return deviceDetailValue(d, "build_display", "android_build");
+    }
+
+    function deviceBuildType(d) {
+      const top = String(d?.build_type || "").trim();
+      if (top) return top;
+      return deviceDetailValue(d, "build_type");
+    }
+
+    function devicePhysicalState(d) {
+      const top = String(d?.physical || "").trim();
+      if (top) return top;
+      return deviceDetailValue(d, "physical");
+    }
+
+    function deviceLowRamState(d) {
+      const top = String(d?.low_ram || "").trim();
+      if (top) return top;
+      return deviceDetailValue(d, "low_ram");
+    }
+
+    function deviceAndroidRelease(d) {
+      const top = String(d?.android_release || "").trim();
+      if (top) return top;
+      return deviceDetailValue(d, "android_release");
+    }
+
+    function formatDiskMb(value) {
+      const n = Number(value);
+      if (!Number.isFinite(n) || n < 0) return "";
+      if (n >= 1024) return `${(n / 1024).toFixed(n >= 10240 ? 0 : 1)} GB`;
+      return `${Math.round(n)} MB`;
+    }
+
+    function deviceRamLabel(d) {
+      const total = deviceDetailValue(d, "ram_mb");
+      const avail = deviceDetailValue(d, "ram_avail_mb");
+      if (!total && !avail) return "";
+      const bits = [];
+      if (total) bits.push((formatDiskMb(total) || (total + " MB")) + " total");
+      if (avail) bits.push((formatDiskMb(avail) || (avail + " MB")) + " free");
+      return bits.join(" · ");
+    }
+
+    function deviceDiskLabel(d) {
+      const free = deviceDetailValue(d, "disk_free_mb");
+      const total = deviceDetailValue(d, "disk_total_mb");
+      if (!free && !total) return "";
+      const bits = [];
+      if (free) bits.push((formatDiskMb(free) || (free + " MB")) + " free");
+      if (total) bits.push((formatDiskMb(total) || (total + " MB")) + " total");
+      return bits.join(" · ");
+    }
+
+    /** Remaining details_json keys (patch / API / build are shown as primary fields). */
     function deviceDetailsRows(d) {
       const obj = deviceDetailsObject(d);
-      const patch = deviceDetailValue(d, "security_patch");
-      const api = deviceDetailValue(d, "api_level", "sdk");
-      const buildId = deviceDetailValue(d, "build_id");
-      const preferred = [];
-      if (patch) preferred.push(fieldRow("Security patch", patch));
-      if (api) preferred.push(fieldRow("API level", api));
-      if (buildId) preferred.push(fieldRow("Build ID", buildId, true));
-
       const skip = new Set([
         "fingerprint", "idfv", "user_agent",
         "security_patch", "api_level", "sdk", "build_id",
+        "build_display", "android_build", "build_type", "android_release",
+        "physical", "low_ram", "build_incremental",
       ]);
-      const rest = Object.entries(obj)
+      return Object.entries(obj)
         .filter(([k, v]) => k && v != null && String(v).trim() && !skip.has(String(k)))
         .sort(([a], [b]) => String(a).localeCompare(String(b)))
         .map(([k, v]) => {
           const label = DEVICE_DETAIL_LABELS[k] || String(k).replace(/_/g, " ");
-          return fieldRow(label, String(v));
-        });
-      return preferred.concat(rest).join("");
+          let shown = String(v);
+          if (k === "disk_free_mb" || k === "disk_total_mb" || k === "ram_mb" || k === "ram_avail_mb") {
+            const human = formatDiskMb(v);
+            if (human) shown = `${human} (${shown})`;
+          }
+          if (k === "build_time") {
+            const ms = Number(v);
+            if (Number.isFinite(ms) && ms > 0) {
+              try { shown = `${new Date(ms).toISOString()} (${v})`; } catch (_) {}
+            }
+          }
+          return fieldRow(label, shown);
+        })
+        .join("");
     }
 
     function deviceHardwareMeta(d) {
@@ -5241,9 +5798,9 @@
       if (d?.model) bits.push(d.model);
       else if (d?.device_name) bits.push(d.device_name);
       if (d?.os_version) bits.push(d.os_version);
-      const patch = deviceDetailValue(d, "security_patch");
+      const patch = deviceSecurityPatch(d);
       if (patch) bits.push(`patch ${patch}`);
-      const api = deviceDetailValue(d, "api_level", "sdk");
+      const api = deviceApiLevel(d);
       if (api && !(d?.os_version || "").includes(`API ${api}`)) bits.push(`API ${api}`);
       return bits.length ? bits.join(" / ") : `${d?.platform || "—"} / ${d?.model || "—"}`;
     }
@@ -5701,6 +6258,7 @@
         ["CMDEV", s.allow_dev_envelope ? "allowed" : "blocked"],
         ["OTP webhook", s.otp_delivery_webhook_url ? short(s.otp_delivery_webhook_url, 40) : "off"],
         ["Public URL", s.public_url || "—"],
+        ["Healthz poll", `${s.healthz_interval_secs ?? 60}s`],
         ["Bandwidth", `↓${formatRate(rxBps)} ↑${formatRate(txBps)} (${bw.window_secs || 10}s)`],
         ["RX / TX total", `${formatBytes(bw.rx_total ?? 0, { compact: true })} / ${formatBytes(bw.tx_total ?? 0, { compact: true })}`],
         ["Started", formatTs(o.started_at)],
@@ -5720,6 +6278,10 @@
       f.public_url.value = s.public_url || "";
       f.lab_seal.checked = !!s.lab_seal;
       f.allow_dev_envelope.checked = !!s.allow_dev_envelope;
+      if (f.healthz_interval_secs) {
+        const n = Number(s.healthz_interval_secs);
+        f.healthz_interval_secs.value = Number.isFinite(n) && n > 0 ? Math.round(n) : 60;
+      }
       if (f.otp_delivery_webhook_url) {
         f.otp_delivery_webhook_url.value = s.otp_delivery_webhook_url || "";
       }
@@ -5901,6 +6463,7 @@
     function renderDevices(list) {
       const q = state.filter.devices;
       const coFilter = state.filter.devicesCompany || "";
+      const stFilter = state.filter.devicesStatus || "";
       renderCompanyFilterChips(
         "devices-company-filter",
         "devices",
@@ -5911,57 +6474,168 @@
           renderDevices(state.cache.devices || []);
         }
       );
-      const filtered = list.filter((d) => {
+
+      const presenceCounts = { "": 0, active: 0, online: 0, idle: 0, offline: 0, never: 0, banned: 0 };
+      (list || []).forEach((d) => {
+        const cid = deviceCompanyId(d);
+        if (coFilter === "__none__" && cid) return;
+        if (coFilter && coFilter !== "__none__" && cid !== coFilter) return;
+        if (!matchesFilter(
+          [d.device_id, d.case_id, d.email, cid, d.company_id, companyName(cid), d.platform, d.model, d.os_version,
+           d.app_version, d.manufacturer, d.brand, d.device_name, d.last_seen_at,
+           d.security_patch, d.api_level, deviceSecurityPatch(d), deviceApiLevel(d),
+           deviceQuota(d).usageLabel, deviceQuota(d).stateLabel,
+           d.public_key, d.noise_key, d.noise_key_fingerprint].join(" "),
+          q
+        )) return;
+        const key = devicePresenceKey(d);
+        presenceCounts[""] += 1;
+        presenceCounts[key] = (presenceCounts[key] || 0) + 1;
+        if (key !== "banned") presenceCounts.active += 1;
+      });
+
+      const summary = $("devices-summary");
+      if (summary) {
+        summary.hidden = !(list || []).length;
+        summary.innerHTML = `
+          <span class="stat"><span class="n">${esc(presenceCounts.active)}</span> active</span>
+          <span class="sep" aria-hidden="true"></span>
+          <span class="stat online"><span class="n">${esc(presenceCounts.online)}</span> online</span>
+          <span class="stat idle"><span class="n">${esc(presenceCounts.idle)}</span> idle</span>
+          <span class="stat"><span class="n">${esc(presenceCounts.offline)}</span> offline</span>
+          <span class="stat"><span class="n">${esc(presenceCounts.never)}</span> never</span>
+          <span class="sep" aria-hidden="true"></span>
+          <span class="stat banned"><span class="n">${esc(presenceCounts.banned)}</span> banned</span>
+          <span class="stat" style="margin-left:auto;color:var(--ink-faint)">poll ${esc(healthzIntervalSecs())}s · online ≤${esc(Math.max(120, healthzIntervalSecs() * 2 + 30))}s · idle ≤1h</span>`;
+      }
+
+      const statusHost = $("devices-status-filter");
+      if (statusHost) {
+        const chips = [
+          { id: "active", label: "Active" },
+          { id: "online", label: "Online" },
+          { id: "idle", label: "Idle" },
+          { id: "offline", label: "Offline" },
+          { id: "never", label: "Never" },
+          { id: "banned", label: "Banned" },
+          { id: "", label: "All" },
+        ];
+        statusHost.innerHTML = `<span class="filter-label">Presence</span>${chips.map((c) =>
+          `<button type="button" class="chip${c.id === stFilter ? " active" : ""}" data-st="${esc(c.id)}">${esc(c.label)}<span class="n">${esc(presenceCounts[c.id] || 0)}</span></button>`
+        ).join("")}`;
+        statusHost.querySelectorAll(".chip").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            state.filter.devicesStatus = btn.getAttribute("data-st") || "";
+            renderDevices(state.cache.devices || []);
+          });
+        });
+      }
+
+      const filtered = collapseStaleEmailDuplicates((list || []).filter((d) => {
         const cid = deviceCompanyId(d);
         if (coFilter === "__none__" && cid) return false;
         if (coFilter && coFilter !== "__none__" && cid !== coFilter) return false;
+        if (!deviceMatchesStatusFilter(d, stFilter)) return false;
         return matchesFilter(
           [d.device_id, d.case_id, d.email, cid, d.company_id, companyName(cid), d.platform, d.model, d.os_version,
            d.app_version, d.manufacturer, d.brand, d.device_name, d.last_seen_at,
+           d.security_patch, d.api_level, deviceSecurityPatch(d), deviceApiLevel(d),
+           deviceQuota(d).usageLabel, deviceQuota(d).stateLabel,
            d.public_key, d.noise_key, d.noise_key_fingerprint].join(" "),
           q
         );
+      }), stFilter);
+
+      const rank = { online: 0, idle: 1, offline: 2, never: 3, banned: 4 };
+      filtered.sort((a, b) => {
+        const pa = devicePresenceKey(a);
+        const pb = devicePresenceKey(b);
+        const ra = rank[pa] ?? 9;
+        const rb = rank[pb] ?? 9;
+        if (ra !== rb) return ra - rb;
+        const ta = parseDate(a.last_seen_at)?.getTime() || 0;
+        const tb = parseDate(b.last_seen_at)?.getTime() || 0;
+        if (tb !== ta) return tb - ta;
+        return String(a.email || a.device_id || "").localeCompare(String(b.email || b.device_id || ""));
       });
+
       if (!filtered.length) {
         $("devices").innerHTML = emptyHtml(list.length ? "No devices match filter." : "No enrolled devices yet.");
         return;
       }
-      $("devices").innerHTML = `<div class="expand-list">
-        <div class="expand-list-head" aria-hidden="true">
-          <span></span><span>Device</span><span>Company</span><span>Last submit</span><span class="h-status">Status</span><span></span>
+      $("devices").innerHTML = `<div class="expand-list devices-list">
+        <div class="expand-list-head device-head" aria-hidden="true">
+          <span></span>
+          <span>Identity</span>
+          <span>Phone</span>
+          <span class="h-company">Company</span>
+          <span class="h-checkin">Check-in</span>
+          <span>Quota</span>
+          <span class="h-blobs">Blobs</span>
+          <span class="h-status">Status</span>
+          <span></span>
         </div>
         ${filtered.map((d) => {
         const cid = deviceCompanyId(d);
         const banned = d.banned || d.public_key_banned;
-        const status = banned
+        const checkIn = deviceCheckIn(d);
+        const presence = devicePresenceKey(d);
+        const hasNoise = !!(d.has_noise_key || d.noise_key);
+        const statusPill = banned
           ? `<span class="pill bad">banned</span>`
-          : (d.has_noise_key || d.noise_key
-            ? `<span class="pill ok">noise ok</span>`
-            : `<span class="pill warn">no noise</span>`);
+          : checkIn.pill;
         const key = expandKey("device", d.device_id);
         const open = state.expanded.has(key) ? " open" : "";
         const sub = deviceSubmissionSummary(d);
         const related = sub.related;
-        const sideTs = sub.lastAt || d.enrolled_at;
-        const sideTitle = sub.lastAt
-          ? `Last submission: ${formatTs(sub.lastAt)}\nEnrolled: ${formatTs(d.enrolled_at)}\n${sub.count} submission${sub.count === 1 ? "" : "s"}`
-          : `Enrolled: ${formatTs(d.enrolled_at)}\nNo submissions yet`;
+        const ageText = checkIn.raw ? (formatAge(checkIn.raw) || "just now") : "never";
+        const sideTitle = [
+          checkIn.raw ? `Last check-in (healthz/API): ${formatTs(checkIn.raw)}${formatAge(checkIn.raw) ? ` (${formatAge(checkIn.raw)})` : ""}` : "Never checked in via healthz/API",
+          sub.lastAt ? `Last submission: ${formatTs(sub.lastAt)}` : "No submissions yet",
+          `Enrolled: ${formatTs(d.enrolled_at)}`,
+          hasNoise ? "Noise key present" : "No noise key",
+          sub.count ? `${sub.count} submission${sub.count === 1 ? "" : "s"}` : null,
+        ].filter(Boolean).join("\n");
+        const rowTone = banned ? " device-banned" : checkIn.online ? " device-online" : "";
+        const patch = deviceSecurityPatch(d);
+        const apiLvl = deviceApiLevel(d);
+        const buildDisp = deviceBuildDisplay(d);
+        const buildType = deviceBuildType(d);
+        const phys = devicePhysicalState(d);
+        const statesLine = deviceStatesLabel(d);
+        const quota = deviceQuota(d);
+        const prevCount = devicePreviousCount(d, list);
         const blobLinks = related.length
           ? related.map((b) =>
               `<div>${blobLink(b.blob_id, b.filename || b.artefact || short(b.blob_id, 13))}
                <span class="mono" style="color:var(--ink-faint)"> · ${esc(formatTs(b.created_at))} · ${esc(formatBytes(b.size, { compact: true }))} · ${esc(b.download_count || 0)} DL</span></div>`
             ).join("")
           : `<span class="empty">No blobs from this device yet.</span>`;
-        return `<div class="expand-row${open}" data-expand-key="${esc(key)}" data-entity-id="${esc(d.device_id)}">
-          <div class="expand-summary with-company" role="button" tabindex="0" aria-expanded="${open ? "true" : "false"}">
+        return `<div class="expand-row${open}${rowTone}" data-expand-key="${esc(key)}" data-entity-id="${esc(d.device_id)}">
+          <div class="expand-summary with-company device-row" role="button" tabindex="0" aria-expanded="${open ? "true" : "false"}">
             <span class="expand-chevron">▸</span>
             <span class="expand-main">
-              <span class="label">${esc(d.email || d.platform || "Device")}</span>
-              <span class="meta">${esc(short(d.device_id, 18))} · ${esc(deviceHardwareMeta(d))}${d.app_version ? ` · app ${esc(d.app_version)}` : ""}${sub.count ? ` · ${sub.count} blob${sub.count === 1 ? "" : "s"}` : " · no blobs"}</span>
+              <span class="label">${esc(d.email || "No email")}</span>
+              <span class="meta" title="${esc(d.device_id)}">${esc(short(d.device_id, 14))}${!hasNoise ? " · no noise" : ""}${quota.bypass ? " · bypass" : ""}${prevCount ? ` · ${prevCount} previous` : ""}</span>
+            </span>
+            <span class="device-phone" title="${esc(deviceHardwareMeta(d))}">
+              <span class="model">${esc(devicePhoneLabel(d))}</span>
+              <span class="os">${esc(deviceOsLabel(d))}</span>
+              <span class="build${buildDisp ? "" : " missing"}" title="${esc(buildDisp || "")}">${buildDisp ? `Build ${esc(buildDisp)}` : "Build —"}</span>
+              <span class="patch${patch ? "" : " missing"}">${patch ? `Security patch ${esc(patch)}` : "Security patch —"}</span>
+              ${statesLine ? `<span class="states">${esc(statesLine)}</span>` : ""}
             </span>
             <span class="expand-company">${companyPill(cid)}</span>
-            <span class="expand-side" title="${esc(sideTitle)}">${esc(formatTsShort(sideTs))}${sub.lastAt ? "" : " · enroll"}</span>
-            <span class="expand-status">${status}</span>
+            <span class="device-checkin" title="${esc(sideTitle)}">
+              <span class="age ${esc(presence)}">${esc(ageText)}</span>
+              <span class="when">${esc(checkIn.raw ? formatTsShort(checkIn.raw) : "—")}</span>
+            </span>
+            <span class="device-quota" title="${esc(quota.title)}">
+              <span class="usage ${esc(quota.state)}">${esc(quota.usageLabel)}</span>
+              <span class="qstate ${esc(quota.state)}">${esc(quota.stateLabel)}</span>
+            </span>
+            <span class="device-blobs${sub.count ? " has" : ""}" title="${esc(sub.count ? `${sub.count} blob(s)` : "No blobs")}">${esc(sub.count || 0)}</span>
+            <span class="expand-status">${statusPill}</span>
             <span class="expand-actions">
               <button type="button" class="sm" data-ban-device="${esc(d.device_id)}" data-banned="${banned ? "0" : "1"}">
                 ${banned ? "Unban" : "Ban"}
@@ -5974,10 +6648,12 @@
           <div class="expand-detail">
             <dl class="detail-dl">
               ${fieldRow("Enrolled", formatTs(d.enrolled_at))}
+              ${fieldRowHtml("Last check-in", checkIn.raw
+                ? `${checkIn.pill} <span class="mono">${esc(checkIn.label)}</span>`
+                : `${checkIn.pill} <span class="hint">no /healthz or API call with x-device-id yet</span>`)}
               ${fieldRow("Last submission", sub.lastAt ? formatTs(sub.lastAt) : "—")}
               ${fieldRow("Submissions", String(sub.count))}
               ${fieldRow("Last artefact", sub.lastArtefact || "—")}
-              ${fieldRow("Last seen", d.last_seen_at ? formatTs(d.last_seen_at) : "—")}
               ${fieldRow("App version", d.app_version || "—")}
               ${fieldRowHtml("Device ID", deviceLink(d.device_id), d.device_id)}
               ${fieldRow("Case ID", d.case_id, true)}
@@ -5986,16 +6662,36 @@
               ${fieldRow("Platform", d.platform || "—")}
               ${fieldRow("Model", d.model || "—")}
               ${fieldRow("OS / system", d.os_version || "—")}
+              ${fieldRow("Android release", deviceAndroidRelease(d) || "—")}
+              ${fieldRow("Security patch", patch || "— (not reported yet; needs an app /healthz or enroll with patch)")}
+              ${fieldRow("API level", apiLvl || "—")}
+              ${fieldRow("Build (exact)", buildDisp || "—")}
+              ${fieldRow("Build incremental", deviceDetailValue(d, "build_incremental") || "—")}
+              ${fieldRow("Build ID", deviceDetailValue(d, "build_id") || "—")}
+              ${fieldRow("Build type", buildType || "—")}
+              ${fieldRow("Device state", phys ? (phys === "yes" ? "physical" : phys) : "—")}
+              ${fieldRow("Low-RAM", deviceLowRamState(d) || "—")}
+              ${fieldRow("RAM", deviceRamLabel(d) || "—")}
+              ${fieldRow("Disk free", deviceDiskLabel(d) || "—")}
               ${fieldRow("Manufacturer", d.manufacturer || "—")}
               ${fieldRow("Brand", d.brand || "—")}
               ${fieldRow("Device name", d.device_name || "—")}
               ${deviceDetailsRows(d)}
               ${fieldRow("Banned", banned ? "yes" : "no")}
-              ${fieldRow("Rate-limit bypass", d.rate_limit_bypass ? "yes" : "no")}
+              ${fieldRowHtml("Upload quota", `<span class="mono">${esc(quota.usageLabel)}</span> · <span class="pill ${quota.state === "exhausted" ? "bad" : quota.state === "near" ? "warn" : quota.state === "ok" ? "ok" : ""}">${esc(quota.stateLabel)}</span>`)}
+              ${fieldRow("Quota limit / hour", quota.bypass ? "bypassed" : (quota.unlimited ? "unlimited" : String(quota.limit)))}
+              ${fieldRow("Quota used (window)", String(quota.used))}
+              ${fieldRow("Quota remaining", quota.remaining == null ? "—" : String(quota.remaining))}
+              ${fieldRow("Quota window", `${Math.round(quota.windowSecs / 60)} min`)}
+              ${quota.retryAfter != null ? fieldRow("Quota retry after", `~${quota.retryAfter}s`) : ""}
+              ${fieldRow("Rate-limit bypass", quota.bypass ? "yes" : "no")}
+              ${fieldRow("Noise key", hasNoise ? "present" : "missing")}
               ${fieldRow("Public key", d.public_key, true)}
-              ${fieldRow("Noise key", d.noise_key || "—", !!d.noise_key)}
+              ${fieldRow("Noise key (hex)", d.noise_key || "—", !!d.noise_key)}
               ${fieldRow("Noise fingerprint", d.noise_key_fingerprint || "—", !!d.noise_key_fingerprint)}
+              ${fieldRow("Previous keys", prevCount ? String(prevCount) : "none")}
             </dl>
+            ${deviceKeyHistoryHtml(d, list)}
             <div class="card" style="margin-top:0.85rem">
               <div class="card-title"><h3>Blobs</h3><span class="hint">uploaded by this device</span></div>
               ${blobLinks}
@@ -6063,12 +6759,58 @@
       });
     }
 
+    function normalizePkHex(pk) {
+      return String(pk || "").trim().toLowerCase().replace(/^0x/, "");
+    }
+
+    /** Devices whose current or historical public key matches (newest first). */
+    function devicesForPublicKey(publicKey) {
+      const want = normalizePkHex(publicKey);
+      if (!want) return [];
+      const hits = [];
+      for (const d of state.cache.devices || []) {
+        const current = normalizePkHex(d.public_key);
+        if (current && current === want) {
+          hits.push({ device: d, via: "current" });
+          continue;
+        }
+        const hist = Array.isArray(d.key_history) ? d.key_history : [];
+        if (hist.some((h) => normalizePkHex(h.public_key) === want)) {
+          hits.push({ device: d, via: "history" });
+        }
+      }
+      hits.sort((a, b) => String(b.device.last_seen_at || b.device.enrolled_at || "")
+        .localeCompare(String(a.device.last_seen_at || a.device.enrolled_at || "")));
+      return hits;
+    }
+
+    function bannedKeyDeviceLinks(publicKey) {
+      const hits = devicesForPublicKey(publicKey);
+      if (!hits.length) return `<span class="empty">—</span>`;
+      return hits.map(({ device: d, via }) => {
+        const label = d.email || devicePhoneLabel(d) || short(d.device_id, 12);
+        const title = [
+          d.device_id,
+          d.email || null,
+          devicePhoneLabel(d),
+          via === "history" ? "matched previous key" : "current key",
+        ].filter(Boolean).join("\n");
+        return `<div title="${esc(title)}">${deviceLink(d.device_id, label)}${via === "history" ? ` <span class="hint">prev</span>` : ""}</div>`;
+      }).join("");
+    }
+
     function renderBanned(list) {
       const q = state.filter.keys;
-      const filtered = (list || []).filter((b) => matchesFilter(
-        [b.banned_at, b.public_key, b.reason].join(" "),
-        q
-      ));
+      const filtered = (list || []).filter((b) => {
+        const hits = devicesForPublicKey(b.public_key);
+        const deviceBits = hits.flatMap(({ device: d }) => [
+          d.device_id, d.email, d.model, d.manufacturer, d.device_name, d.platform,
+        ]);
+        return matchesFilter(
+          [b.banned_at, b.public_key, b.reason, ...deviceBits].join(" "),
+          q
+        );
+      });
       if (!filtered.length) {
         $("banned-keys").innerHTML = emptyHtml(
           (list || []).length ? "No banned keys match filter." : "No banned public keys."
@@ -6076,13 +6818,15 @@
         return;
       }
       $("banned-keys").innerHTML = wrapTable(`<table>
-        <thead><tr><th>Banned at</th><th>Public key</th><th>Reason</th><th></th></tr></thead>
+        <thead><tr><th>Banned at</th><th>Public key</th><th>Device</th><th>Reason</th><th></th></tr></thead>
         <tbody>${filtered.map((b) => `<tr>
           <td class="mono" title="${esc(b.banned_at)}">${esc(formatTs(b.banned_at))}</td>
           <td class="mono" title="${esc(b.public_key)}">${esc(short(b.public_key, 28))}</td>
+          <td>${bannedKeyDeviceLinks(b.public_key)}</td>
           <td>${esc(b.reason || "—")}</td>
           <td><button type="button" class="sm" data-unban-pk="${esc(b.public_key)}">Unban</button></td>
         </tr>`).join("")}</tbody></table>`);
+      wireNavLinks($("banned-keys"));
       $("banned-keys").querySelectorAll("[data-unban-pk]").forEach((btn) => {
         btn.addEventListener("click", async () => {
           try {
@@ -6314,32 +7058,65 @@
     function renderCompanyDevices(list) {
       const host = $("company-devices");
       if (!host) return;
-      if (!(list || []).length) {
-        host.innerHTML = emptyHtml("No devices enrolled for this company yet.");
+      const showBanned = !!state.filter.companyDevicesShowBanned;
+      const all = list || [];
+      const visible = collapseStaleEmailDuplicates(
+        showBanned ? all : all.filter((d) => !deviceIsBanned(d)),
+        showBanned ? "banned" : "active",
+      );
+      const bannedHidden = all.filter((d) => deviceIsBanned(d)).length;
+      if ($("company-devices-hint")) {
+        $("company-devices-hint").textContent = bannedHidden && !showBanned
+          ? `${visible.length} active · ${bannedHidden} banned hidden`
+          : String(all.length);
+      }
+      if (!visible.length) {
+        const extra = bannedHidden && !showBanned
+          ? ` <button type="button" class="sm ghost" id="company-devices-show-banned">Show ${bannedHidden} banned</button>`
+          : "";
+        host.innerHTML = emptyHtml("No active devices for this company.") + extra;
+        const btn = $("company-devices-show-banned");
+        if (btn) {
+          btn.addEventListener("click", () => {
+            state.filter.companyDevicesShowBanned = true;
+            renderCompanyDevices(all);
+          });
+        }
         return;
       }
-      host.innerHTML = `<div class="expand-list">${list.map((d) => {
+      const toggle = bannedHidden
+        ? `<div class="row-actions" style="margin-bottom:0.5rem">
+            <button type="button" class="sm ghost" id="company-devices-toggle-banned">
+              ${showBanned ? "Hide banned" : `Show ${bannedHidden} banned`}
+            </button>
+          </div>`
+        : "";
+      host.innerHTML = `${toggle}<div class="expand-list">${visible.map((d) => {
         const banned = d.banned || d.public_key_banned;
+        const checkIn = deviceCheckIn(d);
+        const noise = d.has_noise_key || d.noise_key
+          ? `<span class="pill ok">noise ok</span>`
+          : `<span class="pill warn">no noise</span>`;
         const status = banned
-          ? `<span class="pill bad">banned</span>`
-          : (d.has_noise_key || d.noise_key
-            ? `<span class="pill ok">noise ok</span>`
-            : `<span class="pill warn">no noise</span>`);
+          ? `<span class="pill bad">banned</span> ${checkIn.pill}`
+          : `${checkIn.pill} ${noise}`;
         const key = expandKey("cdevice", d.device_id);
         const open = state.expanded.has(key) ? " open" : "";
         const sub = deviceSubmissionSummary(d);
-        const sideTs = sub.lastAt || d.enrolled_at;
-        const sideTitle = sub.lastAt
-          ? `Last submission: ${formatTs(sub.lastAt)}\nEnrolled: ${formatTs(d.enrolled_at)}`
-          : `Enrolled: ${formatTs(d.enrolled_at)}\nNo submissions yet`;
+        const sideTs = checkIn.raw || sub.lastAt || d.enrolled_at;
+        const sideTitle = [
+          checkIn.raw ? `Last check-in (healthz/API): ${formatTs(checkIn.raw)}${formatAge(checkIn.raw) ? ` (${formatAge(checkIn.raw)})` : ""}` : "Never checked in via healthz/API",
+          sub.lastAt ? `Last submission: ${formatTs(sub.lastAt)}` : "No submissions yet",
+          `Enrolled: ${formatTs(d.enrolled_at)}`,
+        ].join("\n");
         return `<div class="expand-row${open}" data-expand-key="${esc(key)}">
           <div class="expand-summary" role="button" tabindex="0" aria-expanded="${open ? "true" : "false"}">
             <span class="expand-chevron">▸</span>
             <span class="expand-main">
               <span class="label">${esc(d.email || d.platform || "Device")}</span>
-              <span class="meta">${esc(short(d.device_id, 18))} · ${esc(deviceHardwareMeta(d))}${sub.count ? ` · ${sub.count} blob${sub.count === 1 ? "" : "s"}` : ""}</span>
+              <span class="meta">${esc(short(d.device_id, 18))} · ${esc(deviceHardwareMeta(d))} · quota ${esc(deviceQuota(d).usageLabel)}${sub.count ? ` · ${sub.count} blob${sub.count === 1 ? "" : "s"}` : ""}</span>
             </span>
-            <span class="expand-side" title="${esc(sideTitle)}">${esc(formatTsShort(sideTs))}</span>
+            <span class="expand-side" title="${esc(sideTitle)}">${esc(formatTsShort(sideTs))}${checkIn.raw ? (checkIn.online ? " · check-in" : " · last seen") : ""}</span>
             <span class="expand-status">${status}</span>
             <span class="expand-actions">
               <button type="button" class="sm" data-c-ban-device="${esc(d.device_id)}" data-banned="${banned ? "0" : "1"}">
@@ -6353,10 +7130,12 @@
           <div class="expand-detail">
             <dl class="detail-dl">
               ${fieldRow("Enrolled", formatTs(d.enrolled_at))}
+              ${fieldRowHtml("Last check-in", checkIn.raw
+                ? `${checkIn.pill} <span class="mono">${esc(checkIn.label)}</span>`
+                : `${checkIn.pill} <span class="hint">no /healthz or API call with x-device-id yet</span>`)}
               ${fieldRow("Last submission", sub.lastAt ? formatTs(sub.lastAt) : "—")}
               ${fieldRow("Submissions", String(sub.count))}
               ${fieldRow("Last artefact", sub.lastArtefact || "—")}
-              ${fieldRow("Last seen", d.last_seen_at ? formatTs(d.last_seen_at) : "—")}
               ${fieldRow("App version", d.app_version || "—")}
               ${fieldRowHtml("Device ID", deviceLink(d.device_id), d.device_id)}
               ${fieldRow("Case ID", d.case_id, true)}
@@ -6364,18 +7143,35 @@
               ${fieldRow("Platform", d.platform || "—")}
               ${fieldRow("Model", d.model || "—")}
               ${fieldRow("OS / system", d.os_version || "—")}
+              ${fieldRow("Android release", deviceAndroidRelease(d) || "—")}
+              ${fieldRow("Security patch", deviceSecurityPatch(d) || "— (not reported yet)")}
+              ${fieldRow("API level", deviceApiLevel(d) || "—")}
+              ${fieldRow("Build (exact)", deviceBuildDisplay(d) || "—")}
+              ${fieldRow("Build type", deviceBuildType(d) || "—")}
+              ${fieldRow("Device state", (() => { const p = devicePhysicalState(d); return p ? (p === "yes" ? "physical" : p) : "—"; })())}
+              ${fieldRow("Low-RAM", deviceLowRamState(d) || "—")}
               ${fieldRow("Manufacturer", d.manufacturer || "—")}
               ${fieldRow("Brand", d.brand || "—")}
               ${fieldRow("Device name", d.device_name || "—")}
               ${deviceDetailsRows(d)}
+              ${(() => { const q = deviceQuota(d); return `
+              ${fieldRowHtml("Upload quota", `<span class="mono">${esc(q.usageLabel)}</span> · <span class="pill ${q.state === "exhausted" ? "bad" : q.state === "near" ? "warn" : q.state === "ok" ? "ok" : ""}">${esc(q.stateLabel)}</span>`)}
+              ${fieldRow("Quota remaining", q.remaining == null ? "—" : String(q.remaining))}
               ${fieldRow("Banned", banned ? "yes" : "no")}
-              ${fieldRow("Rate-limit bypass", d.rate_limit_bypass ? "yes" : "no")}
+              ${fieldRow("Rate-limit bypass", q.bypass ? "yes" : "no")}`; })()}
               ${fieldRow("Public key", d.public_key, true)}
               ${fieldRow("Noise fingerprint", d.noise_key_fingerprint || "—", !!d.noise_key_fingerprint)}
             </dl>
           </div>
         </div>`;
       }).join("")}</div>`;
+      const toggleBtn = $("company-devices-toggle-banned");
+      if (toggleBtn) {
+        toggleBtn.addEventListener("click", () => {
+          state.filter.companyDevicesShowBanned = !showBanned;
+          renderCompanyDevices(all);
+        });
+      }
       wireExpandList(host);
       wireNavLinks(host);
       host.querySelectorAll("[data-c-ban-device]").forEach((btn) => {
@@ -6582,7 +7378,6 @@
           $("company-detail-meta").textContent =
             `id ${c.id} · ${devices.length} device${devices.length === 1 ? "" : "s"} · ${labKeys.length} lab key${labKeys.length === 1 ? "" : "s"} · ${tokens.length} token${tokens.length === 1 ? "" : "s"} · updated ${formatTs(c.updated_at)}`;
         }
-        if ($("company-devices-hint")) $("company-devices-hint").textContent = String(devices.length);
         renderCompanyDevices(devices);
         if ($("company-labkeys-hint")) $("company-labkeys-hint").textContent = String(labKeys.length);
         renderCompanyLabKeys(labKeys);
@@ -7872,6 +8667,7 @@
             ["TLS", s.tls ? "on" : "off"],
             ["Lab seal", s.lab_seal ? "on" : "off"],
             ["Allow CMDEV", s.allow_dev_envelope ? "on" : "off"],
+            ["Healthz poll", `${s.healthz_interval_secs ?? 60}s`],
             ["Reveal OTP", s.lab_reveal_otp ? "on" : "off"],
             ["OTP webhook", s.otp_delivery_webhook_url ? s.otp_delivery_webhook_url : "off"],
             ["Data dir", s.data_dir],
@@ -8762,6 +9558,7 @@
           public_url: f.public_url.value,
           lab_seal: f.lab_seal.checked,
           allow_dev_envelope: f.allow_dev_envelope.checked,
+          healthz_interval_secs: Math.max(15, Math.min(3600, Number(f.healthz_interval_secs?.value) || 60)),
           otp_delivery_webhook_url: f.otp_delivery_webhook_url?.value?.trim() || "",
           otp_delivery_webhook_token: f.otp_delivery_webhook_token?.value?.trim() || "",
         };

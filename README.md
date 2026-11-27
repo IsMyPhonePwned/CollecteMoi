@@ -144,7 +144,7 @@ sequenceDiagram
 
 **OTP notification text** is customized per company under **Client apps → Menus → Enroll** (`{code}`, `{company_name}`, `{display_name}`, `{email}`, `{expires_in_mins}`…). The API fills placeholders and sends `subject` / `body` on the webhook JSON.
 
-**Defaults:** 6-digit code, 10 min TTL, `max_devices_per_email` = 1 (0 = unlimited). Re-enrolling the same device key for the same email is allowed.
+**Defaults:** 6-digit code, 10 min TTL, `max_devices_per_email` = 1 (0 = unlimited). Re-enrolling the same device key for the same email is allowed. When `max_devices_per_email` is 1, wipe/reinstall (new keys) with the same email + OTP/lab key **rebinds** the existing device row instead of rejecting or creating a duplicate identity; the old public key is banned.
 
 ---
 
@@ -342,10 +342,11 @@ sequenceDiagram
 | Open / refresh history | List what the lab holds for this device | `POST /v1/client/submissions` body = CMNK proof of `collectemoi-client-submissions-v1:{device_id}` |
 | Failed list | Resend / Delete (local payload) | Resend = same upload sequence as Consent |
 | Device card | Shows enroll snapshot (+ patch/API from later headers) | Headers on any call update `last_seen` / details |
+| Health chip (default 60s; Admin → Settings) | `GET /healthz` with `x-device-id` (+ hardware headers) | Touches device `last_seen` (no access_log row). Response header `x-collectemoi-healthz-interval` sets the next poll period |
 
 #### Headers refresh (any enrolled call)
 
-Whenever the app hits the API after boot, it re-captures device info and sends the `x-device-*` headers above. The API may merge `security_patch` / `api_level` / `build_id` into the device row (admin Devices view).
+Whenever the app hits the API after boot — including the toolbar `/healthz` poll — it re-captures device info and sends the `x-device-*` headers above. The API updates `last_seen` and may merge `security_patch` / `api_level` / `build_id` into the device row (admin Devices view).
 
 ---
 
@@ -409,10 +410,10 @@ flowchart TB
 | **Overview** | Health, KPIs, bandwidth, attention |
 | **Pipeline** | Incomplete uploads, decrypt jobs |
 | **Blobs** | Metadata, download, delete; **message reports** show text + screenshot gallery |
-| **Devices** | Ban / unban; related blobs |
+| **Devices** | Ban / unban; related blobs; **last check-in** from `/healthz` / API (`online` ≈ 2× healthz poll interval) |
 | **Companies** | Domains, lab keys, tokens, pause enroll |
 | **Client apps** | Branding versions, languages, generate/stop builds |
-| **Settings** | Public URL, lab seal, CMDEV, OTP webhook, backup |
+| **Settings** | Public URL, lab seal, CMDEV, **healthz poll** (15–3600s, default 60), OTP webhook, backup |
 | **Security** | Password, TOTP, WebAuthn |
 | **TUI** | `./scripts/collectemoictl tui` — same cookie login |
 

@@ -43,6 +43,23 @@ class PlatformBridge {
     }
   }
 
+  /// Best-effort Samsung SysDump (`*#9900#`) opener.
+  ///
+  /// Returns one of: `sysdump` (activity started), `dialer` (Phone opened with
+  /// the code), `failed`. Samsung often protects SysDump with a system
+  /// signature permission, so dialer fallback is the common path.
+  Future<String> openSamsungSysDump() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return 'failed';
+    try {
+      final result = await _channel.invokeMethod<String>('openSamsungSysDump');
+      return result ?? 'failed';
+    } on MissingPluginException {
+      return 'failed';
+    } on PlatformException {
+      return 'failed';
+    }
+  }
+
   Future<List<Map<String, dynamic>>> pendingShareJobs() async {
     try {
       final result = await _channel.invokeMethod<List<dynamic>>('pendingShareJobs');

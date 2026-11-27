@@ -650,6 +650,18 @@ fn should_skip_persist(path: &str) -> bool {
     )
 }
 
+/// Admin console + health traffic must not drive the overview bandwidth chart.
+fn skip_bandwidth_meter(path: &str, kind: &str, is_admin: bool) -> bool {
+    if is_admin {
+        return true;
+    }
+    let p = path.split('?').next().unwrap_or(path);
+    if p == "/admin" || p.starts_with("/admin/") || p == "/favicon.png" || p == "/healthz" {
+        return true;
+    }
+    matches!(kind, "admin" | "admin_ui" | "health")
+}
+
 fn header_content_length(headers: &HeaderMap) -> u64 {
     headers
         .get(axum::http::header::CONTENT_LENGTH)
@@ -767,6 +779,70 @@ pub async fn middleware(State(state): State<AppState>, req: Request, next: Next)
         .chars()
         .take(64)
         .collect::<String>();
+    let build_display = req
+        .headers()
+        .get("x-device-build-display")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .chars()
+        .take(96)
+        .collect::<String>();
+    let build_incremental = req
+        .headers()
+        .get("x-device-build-incremental")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .chars()
+        .take(64)
+        .collect::<String>();
+    let build_type = req
+        .headers()
+        .get("x-device-build-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .chars()
+        .take(32)
+        .collect::<String>();
+    let android_release = req
+        .headers()
+        .get("x-device-android-release")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .chars()
+        .take(32)
+        .collect::<String>();
+    let physical = req
+        .headers()
+        .get("x-device-physical")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .chars()
+        .take(16)
+        .collect::<String>();
+    let low_ram = req
+        .headers()
+        .get("x-device-low-ram")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .chars()
+        .take(8)
+        .collect::<String>();
+    let ram_mb = req
+        .headers()
+        .get("x-device-ram-mb")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .chars()
+        .take(16)
+        .collect::<String>();
+    let disk_free_mb = req
+        .headers()
+        .get("x-device-disk-free-mb")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .chars()
+        .take(16)
+        .collect::<String>();
     let forwarded = req
         .headers()
         .get("x-forwarded-for")
@@ -792,12 +868,49 @@ pub async fn middleware(State(state): State<AppState>, req: Request, next: Next)
     let status = response.status().as_u16();
     let duration_ms = started.elapsed().as_millis() as u64;
     let tx_bytes = body_bytes_estimate(response.headers(), response.body().size_hint().exact());
-    // Count all HTTP body traffic (including admin polls) for live bandwidth KPIs.
-    state.access.record_bandwidth(rx_bytes, tx_bytes);
+    // Live bandwidth KPIs are for device / public API traffic only. Counting
+    // Admin UI polls (overview refresh, blob lists, logs) made every F5 look
+    // like a multi‑MB/s "upload".
+    if !skip_bandwidth_meter(&path_only, &kind, is_admin) {
+        state.access.record_bandwidth(rx_bytes, tx_bytes);
+    }
+
+    // Attribute enrolled clients even on /healthz (Devices → Last seen / check-in).
+    // Do this before access-log filtering so pings identify the phone without
+    // flooding access_events (health is polled every ~20s).
+    if !device_id.is_empty() && !is_admin {
+        state.enrollment.touch_device(
+            &device_id,
+            &app_version,
+            &platform,
+            &model,
+            &os_version,
+            &manufacturer,
+            &brand,
+            &device_name,
+            &[
+                ("security_patch", security_patch.as_str()),
+                ("api_level", api_level.as_str()),
+                ("sdk", api_level.as_str()),
+                ("build_id", build_id.as_str()),
+                ("build_display", build_display.as_str()),
+                ("android_build", build_display.as_str()),
+                ("build_incremental", build_incremental.as_str()),
+                ("build_type", build_type.as_str()),
+                ("android_release", android_release.as_str()),
+                ("physical", physical.as_str()),
+                ("low_ram", low_ram.as_str()),
+                ("ram_mb", ram_mb.as_str()),
+                ("disk_free_mb", disk_free_mb.as_str()),
+            ],
+        );
+    }
 
     // Always emit a structured connection line into process logs (api.log),
-    // except for the log-panel self-pollers (avoid feedback when viewing Logs).
-    if !should_skip_persist(&path_only) {
+    // except for the log-panel self-pollers (avoid feedback when viewing Logs)
+    // and high-frequency health pings.
+    let skip_access_row = should_skip_persist(&path_only) || kind == "health";
+    if !skip_access_row {
         tracing::info!(
             target: "collectemoi_api::access",
             method = %method,
@@ -820,25 +933,6 @@ pub async fn middleware(State(state): State<AppState>, req: Request, next: Next)
             "connection"
         );
 
-        if !device_id.is_empty() && !is_admin {
-            state.enrollment.touch_device(
-                &device_id,
-                &app_version,
-                &platform,
-                &model,
-                &os_version,
-                &manufacturer,
-                &brand,
-                &device_name,
-                &[
-                    ("security_patch", security_patch.as_str()),
-                    ("api_level", api_level.as_str()),
-                    ("sdk", api_level.as_str()),
-                    ("build_id", build_id.as_str()),
-                ],
-            );
-        }
-
         state.access.record(AccessEvent {
             ts: now_secs_str(),
             method,
@@ -857,6 +951,13 @@ pub async fn middleware(State(state): State<AppState>, req: Request, next: Next)
             model,
             os_version,
         });
+    } else if kind == "health" && !device_id.is_empty() {
+        tracing::debug!(
+            target: "collectemoi_api::access",
+            device_id = %device_id,
+            status,
+            "health check-in"
+        );
     }
 
     response
@@ -905,7 +1006,7 @@ pub async fn access_log(
 
 #[cfg(test)]
 mod tests {
-    use super::classify;
+    use super::{classify, skip_bandwidth_meter};
 
     #[test]
     fn content_without_query_is_download() {
@@ -922,5 +1023,17 @@ mod tests {
         );
         assert_eq!(kind, "blob_preview");
         assert_eq!(id, "6b9daa16-8660-42e6-9434-45fce7ff73ba");
+    }
+
+    #[test]
+    fn bandwidth_meter_skips_admin_and_health() {
+        assert!(skip_bandwidth_meter("/v1/admin/overview", "admin", true));
+        assert!(skip_bandwidth_meter("/admin", "admin_ui", false));
+        assert!(skip_bandwidth_meter("/healthz", "health", false));
+        assert!(!skip_bandwidth_meter(
+            "/v1/uploads/abc/chunks/0",
+            "upload_chunk",
+            false
+        ));
     }
 }

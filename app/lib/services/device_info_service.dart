@@ -31,6 +31,13 @@ class DeviceInfoSnapshot {
   String get securityPatch => details['security_patch'] ?? '';
   String get apiLevel => details['api_level'] ?? details['sdk'] ?? '';
 
+  /// True when manufacturer/brand look like Samsung (One UI / Galaxy).
+  bool get isSamsung {
+    final m = manufacturer.toLowerCase();
+    final b = brand.toLowerCase();
+    return m.contains('samsung') || b.contains('samsung');
+  }
+
   String get summary {
     final parts = <String>[
       if (manufacturer.isNotEmpty &&
@@ -134,12 +141,27 @@ class DeviceInfoService {
         final codename = a.version.codename.trim();
         final baseOs = (a.version.baseOS ?? '').trim();
         final previewSdk = a.version.previewSdkInt;
+        final buildDisplay = a.display.trim();
+        final buildId = a.id.trim();
+        final buildType = a.type.trim();
+        final buildTags = a.tags.trim();
+        // Exact user-visible build string (Settings → About → Build number).
+        final exactBuild = buildDisplay.isNotEmpty
+            ? buildDisplay
+            : [
+                if (buildId.isNotEmpty) buildId,
+                if (incremental.isNotEmpty) incremental,
+              ].join('.');
 
         final osBits = <String>[
           if (release.isNotEmpty) 'Android $release' else 'Android',
           '(API $sdk)',
           if (patch.isNotEmpty) '· patch $patch',
+          if (exactBuild.isNotEmpty) '· $exactBuild',
         ];
+
+        final freeDiskMb = (a.freeDiskSize / (1024 * 1024)).round();
+        final totalDiskMb = (a.totalDiskSize / (1024 * 1024)).round();
 
         return DeviceInfoSnapshot(
           platform: 'android',
@@ -153,22 +175,30 @@ class DeviceInfoService {
             'sdk': '$sdk',
             if (release.isNotEmpty) 'android_release': release,
             if (patch.isNotEmpty) 'security_patch': patch,
+            if (exactBuild.isNotEmpty) 'android_build': exactBuild,
             if (incremental.isNotEmpty) 'build_incremental': incremental,
             if (codename.isNotEmpty && codename != 'REL') 'codename': codename,
             if (baseOs.isNotEmpty) 'base_os': baseOs,
             if (previewSdk != null && previewSdk > 0)
               'preview_sdk': '$previewSdk',
-            if (a.id.trim().isNotEmpty) 'build_id': a.id.trim(),
-            if (a.display.trim().isNotEmpty) 'build_display': a.display.trim(),
-            if (a.type.trim().isNotEmpty) 'build_type': a.type.trim(),
-            if (a.tags.trim().isNotEmpty) 'build_tags': a.tags.trim(),
+            if (buildId.isNotEmpty) 'build_id': buildId,
+            if (buildDisplay.isNotEmpty) 'build_display': buildDisplay,
+            if (buildType.isNotEmpty) 'build_type': buildType,
+            if (buildTags.isNotEmpty) 'build_tags': buildTags,
+            if (a.time > 0) 'build_time': '${a.time}',
             if (a.board.trim().isNotEmpty) 'board': a.board.trim(),
             if (a.bootloader.trim().isNotEmpty) 'bootloader': a.bootloader.trim(),
             if (a.hardware.trim().isNotEmpty) 'hardware': a.hardware.trim(),
             if (a.product.trim().isNotEmpty) 'product': a.product.trim(),
+            if (a.device.trim().isNotEmpty) 'device_codename': a.device.trim(),
             if (a.host.trim().isNotEmpty) 'build_host': a.host.trim(),
             if (a.supportedAbis.isNotEmpty) 'abis': a.supportedAbis.join(', '),
-            if (a.isPhysicalDevice) 'physical': 'yes' else 'physical': 'emulator',
+            'physical': a.isPhysicalDevice ? 'yes' : 'emulator',
+            'low_ram': a.isLowRamDevice ? 'yes' : 'no',
+            if (a.physicalRamSize > 0) 'ram_mb': '${a.physicalRamSize}',
+            if (a.availableRamSize > 0) 'ram_avail_mb': '${a.availableRamSize}',
+            if (totalDiskMb > 0) 'disk_total_mb': '$totalDiskMb',
+            if (freeDiskMb >= 0) 'disk_free_mb': '$freeDiskMb',
             if (a.fingerprint.trim().isNotEmpty)
               'fingerprint': a.fingerprint.trim(),
           },

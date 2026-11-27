@@ -114,6 +114,29 @@ pub struct CollectionRequestDto {
     pub deadline: Option<String>,
 }
 
+/// Previous device keys retained after wipe/reinstall rebind (admin history).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceKeyHistoryEntry {
+    pub replaced_at: String,
+    pub reason: String,
+    pub public_key: String,
+    #[serde(default)]
+    pub noise_key_fingerprint: String,
+    #[serde(default)]
+    pub platform: String,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub app_version: String,
+    #[serde(default)]
+    pub enrolled_at: String,
+    #[serde(default)]
+    pub last_seen_at: String,
+    /// When absorbed from a superseded sibling row.
+    #[serde(default)]
+    pub from_device_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceRecord {
     pub device_id: Uuid,
@@ -151,6 +174,9 @@ pub struct DeviceRecord {
     /// When true, this device ignores the company upload-per-hour quota.
     #[serde(default)]
     pub rate_limit_bypass: bool,
+    /// Previous public keys / fingerprints after rebind (newest last).
+    #[serde(default)]
+    pub key_history: Vec<DeviceKeyHistoryEntry>,
 }
 
 /// Lab admin device view — includes full keys (console is local/dev, no auth).
@@ -176,8 +202,22 @@ pub struct DevicePublicView {
     pub brand: String,
     pub device_name: String,
     pub details_json: String,
+    /// Convenience extract from `details_json` for admin list columns.
+    pub security_patch: String,
+    /// Convenience extract from `details_json` (`api_level` or `sdk`).
+    pub api_level: String,
+    /// Exact Android build string (`Build.DISPLAY` / Settings → Build number).
+    pub build_display: String,
+    pub build_type: String,
+    pub android_release: String,
+    /// `yes` | `emulator` (from device_info_plus).
+    pub physical: String,
+    pub low_ram: String,
     pub last_seen_at: String,
     pub rate_limit_bypass: bool,
+    /// Previous keys for this identity (wipe/reinstall history).
+    #[serde(default)]
+    pub key_history: Vec<DeviceKeyHistoryEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -421,29 +461,7 @@ impl EnrollmentStore {
             .lock()
             .unwrap()
             .values()
-            .map(|d| DevicePublicView {
-                device_id: d.device_id,
-                case_id: d.case_id,
-                public_key: d.public_key.clone(),
-                noise_key: d.noise_key.clone(),
-                noise_key_fingerprint: d.noise_key_fingerprint.clone(),
-                has_noise_key: !d.noise_key.is_empty(),
-                platform: d.platform.clone(),
-                model: d.model.clone(),
-                os_version: d.os_version.clone(),
-                enrolled_at: d.enrolled_at.clone(),
-                banned: d.banned,
-                public_key_banned: banned.contains_key(&normalize_pk(&d.public_key)),
-                email: d.email.clone(),
-                company_id: d.company_id.clone(),
-                app_version: d.app_version.clone(),
-                manufacturer: d.manufacturer.clone(),
-                brand: d.brand.clone(),
-                device_name: d.device_name.clone(),
-                details_json: d.details_json.clone(),
-                last_seen_at: d.last_seen_at.clone(),
-                rate_limit_bypass: d.rate_limit_bypass,
-            })
+            .map(|d| device_public_view(d, banned.contains_key(&normalize_pk(&d.public_key))))
             .collect();
         list.sort_by(|a, b| a.enrolled_at.cmp(&b.enrolled_at));
         list
@@ -469,6 +487,13 @@ impl EnrollmentStore {
                     "brand": d.brand,
                     "device_name": d.device_name,
                     "details_json": d.details_json,
+                    "security_patch": d.security_patch,
+                    "api_level": d.api_level,
+                    "build_display": d.build_display,
+                    "build_type": d.build_type,
+                    "android_release": d.android_release,
+                    "physical": d.physical,
+                    "low_ram": d.low_ram,
                     "last_seen_at": d.last_seen_at,
                     "email": d.email,
                     "company_id": d.company_id,
@@ -666,20 +691,47 @@ impl EnrollmentStore {
 
     /// Active (non-banned) devices already enrolled under this work email.
     pub fn active_device_count_for_email(&self, email: &str) -> usize {
+        self.active_devices_for_email(email).len()
+    }
+
+    /// Active (non-banned) device rows for an email, newest check-in / enroll first.
+    pub fn active_devices_for_email(&self, email: &str) -> Vec<DeviceRecord> {
+        self.devices_for_email(email)
+            .into_iter()
+            .filter(|d| !d.banned)
+            .collect()
+    }
+
+    /// All device rows for an email (including banned), newest check-in / enroll first.
+    pub fn devices_for_email(&self, email: &str) -> Vec<DeviceRecord> {
         let email = email.trim();
         if email.is_empty() {
-            return 0;
+            return Vec::new();
         }
-        self.devices
+        let mut list: Vec<_> = self
+            .devices
             .lock()
             .unwrap()
             .values()
-            .filter(|d| !d.banned && d.email.eq_ignore_ascii_case(email))
-            .count()
+            .filter(|d| d.email.eq_ignore_ascii_case(email))
+            .cloned()
+            .collect();
+        list.sort_by(|a, b| {
+            // Prefer non-banned, then most recently seen / enrolled.
+            a.banned
+                .cmp(&b.banned)
+                .then_with(|| b.last_seen_at.cmp(&a.last_seen_at))
+                .then_with(|| b.enrolled_at.cmp(&a.enrolled_at))
+        });
+        list
     }
 
     /// Enforce per-email device caps. `max == 0` means unlimited.
-    /// Re-enrolling the same device public key for the same email is always allowed.
+    ///
+    /// Always allowed:
+    /// - Re-enrolling the same device public key for the same email
+    /// - When `max_devices_per_email == 1` and the slot is full (OTP/lab-proven
+    ///   confirm will rebind the existing identity to the new keys after wipe/reinstall)
     pub fn assert_email_device_slot(
         &self,
         email: &str,
@@ -702,13 +754,14 @@ impl EnrollmentStore {
         }
         let count = self.active_device_count_for_email(email);
         if count >= max_devices_per_email as usize {
-            return Err(if max_devices_per_email == 1 {
-                "this email is already enrolled on another device".into()
-            } else {
-                format!(
-                    "this email already has the maximum of {max_devices_per_email} enrolled devices"
-                )
-            });
+            // Single-slot companies: wipe/reinstall mints new keys; OTP/lab proof
+            // is enough to replace the one active identity on confirm.
+            if max_devices_per_email == 1 {
+                return Ok(());
+            }
+            return Err(format!(
+                "this email already has the maximum of {max_devices_per_email} enrolled devices"
+            ));
         }
         Ok(())
     }
@@ -784,57 +837,65 @@ impl EnrollmentStore {
             return Err("device public key is banned".into());
         }
 
-        self.assert_email_device_slot(&email, max_devices_per_email, Some(&pk))?;
-
         let noise_bytes = validate_noise_key_hex(&noise_key)?;
         let noise_fp = fingerprint_key(&noise_bytes);
         let noise_hex = hex::encode(&noise_bytes);
+        let email_norm = email.trim().to_string();
 
         // Re-enroll: refresh the existing device row for the same pubkey + email.
         if let Some(existing) = self.find_device_by_pubkey(&pk) {
-            if !existing.banned && existing.email.eq_ignore_ascii_case(email.trim()) {
-                let mut record = existing;
-                record.case_id = case_id;
-                record.noise_key = noise_hex;
-                record.noise_key_fingerprint = noise_fp.clone();
-                record.platform = meta.platform;
-                record.model = meta.model;
-                record.os_version = meta.os_version;
-                record.app_version = meta.app_version;
-                record.manufacturer = meta.manufacturer;
-                record.brand = meta.brand;
-                record.device_name = meta.name;
-                record.details_json = meta.details_json;
-                record.last_seen_at = now_secs_str();
-                record.company_id = company_id.clone();
-                record.email = email;
-                record.banned = false;
-                let device_id = record.device_id;
-                self.devices
-                    .lock()
-                    .unwrap()
-                    .insert(device_id, record.clone());
-                let _ = persist_device(&self.db, &self.devices_dir, &record);
-                let path = self.keys_dir.join(format!("device-{device_id}.pk.hex"));
-                let _ = fs::write(path, &pk);
-                let noise_path = self.keys_dir.join(format!("device-{device_id}.noise.hex"));
-                let _ = fs::write(noise_path, &record.noise_key);
-                return Ok(EnrollResponse {
-                    device_id,
+            if !existing.banned && existing.email.eq_ignore_ascii_case(&email_norm) {
+                return self.finish_device_refresh(
+                    existing,
                     case_id,
-                    case_public_key: self.case_public_key.clone(),
-                    server_base_url: self.server_base_url.lock().unwrap().clone(),
-                    display_name: self.display_name.lock().unwrap().clone(),
+                    &pk,
+                    noise_hex,
+                    noise_fp,
+                    meta,
+                    email_norm,
                     company_id,
-                    company_name: String::new(),
-                    enabled_collectors: vec![
-                        "android_bugreport".into(),
-                        "ios_sysdiagnose".into(),
-                        "message_report".into(),
-                    ],
-                    noise_key_fingerprint: noise_fp,
-                });
+                    None,
+                    max_devices_per_email == 1,
+                );
             }
+        }
+
+        let active = self.active_devices_for_email(&email_norm);
+        let at_capacity = max_devices_per_email > 0
+            && active.len() >= max_devices_per_email as usize;
+
+        // Wipe/reinstall (new keys) with max_devices_per_email == 1: rebind the
+        // existing identity for this email instead of rejecting or creating a
+        // duplicate row (covers both "still active" and "admin banned, then re-enroll").
+        if max_devices_per_email == 1 {
+            let existing = active.into_iter().next().or_else(|| {
+                self.devices_for_email(&email_norm).into_iter().next()
+            });
+            if let Some(existing) = existing {
+                let old_pk = normalize_pk(&existing.public_key);
+                return self.finish_device_refresh(
+                    existing,
+                    case_id,
+                    &pk,
+                    noise_hex,
+                    noise_fp,
+                    meta,
+                    email_norm,
+                    company_id,
+                    if old_pk.is_empty() || old_pk == pk {
+                        None
+                    } else {
+                        Some(old_pk)
+                    },
+                    true,
+                );
+            }
+        }
+
+        if at_capacity {
+            return Err(format!(
+                "this email already has the maximum of {max_devices_per_email} enrolled devices"
+            ));
         }
 
         let device_id = Uuid::new_v4();
@@ -850,7 +911,7 @@ impl EnrollmentStore {
             os_version: meta.os_version,
             enrolled_at: enrolled_at.clone(),
             banned: false,
-            email,
+            email: email_norm,
             company_id: company_id.clone(),
             app_version: meta.app_version,
             manufacturer: meta.manufacturer,
@@ -859,6 +920,7 @@ impl EnrollmentStore {
             details_json: meta.details_json,
             last_seen_at: enrolled_at,
             rate_limit_bypass: false,
+            key_history: Vec::new(),
         };
         self.devices
             .lock()
@@ -886,6 +948,131 @@ impl EnrollmentStore {
             ],
             noise_key_fingerprint: noise_fp,
         })
+    }
+
+    /// Update an existing device row in place (same `device_id`), optionally
+    /// retiring the previous public key after a wipe/reinstall rebind.
+    fn finish_device_refresh(
+        &self,
+        existing: DeviceRecord,
+        case_id: Uuid,
+        pk: &str,
+        noise_hex: String,
+        noise_fp: String,
+        meta: DeviceClientMeta,
+        email: String,
+        company_id: String,
+        retire_old_public_key: Option<String>,
+        retire_email_siblings: bool,
+    ) -> Result<EnrollResponse, String> {
+        let mut record = existing;
+        let device_id = record.device_id;
+        let old_pk = normalize_pk(&record.public_key);
+        let keys_changed = old_pk != pk || record.noise_key_fingerprint != noise_fp;
+        if keys_changed && !old_pk.is_empty() {
+            record.key_history.push(history_entry_from_device(
+                &record,
+                "replaced by re-enrollment",
+                "",
+            ));
+        }
+        record.case_id = case_id;
+        record.public_key = pk.to_string();
+        record.noise_key = noise_hex;
+        record.noise_key_fingerprint = noise_fp.clone();
+        record.platform = meta.platform;
+        record.model = meta.model;
+        record.os_version = meta.os_version;
+        record.app_version = meta.app_version;
+        record.manufacturer = meta.manufacturer;
+        record.brand = meta.brand;
+        record.device_name = meta.name;
+        record.details_json = meta.details_json;
+        record.last_seen_at = now_secs_str();
+        record.company_id = company_id.clone();
+        record.email = email;
+        record.banned = false;
+
+        if retire_email_siblings {
+            // Fold sibling rows into this identity's key history, then ban them.
+            let absorbed = self.absorb_other_devices_for_email(device_id, &record.email);
+            record.key_history.extend(absorbed);
+        }
+
+        self.devices
+            .lock()
+            .unwrap()
+            .insert(device_id, record.clone());
+        let _ = persist_device(&self.db, &self.devices_dir, &record);
+        let path = self.keys_dir.join(format!("device-{device_id}.pk.hex"));
+        let _ = fs::write(path, pk);
+        let noise_path = self.keys_dir.join(format!("device-{device_id}.noise.hex"));
+        let _ = fs::write(noise_path, &record.noise_key);
+
+        if let Some(old_pk) = retire_old_public_key {
+            // Device row already points at the new key, so banning the old key
+            // only blocks the wiped install and does not re-ban this identity.
+            let _ = self.ban_public_key(&old_pk, "replaced by re-enrollment");
+        }
+
+        Ok(EnrollResponse {
+            device_id,
+            case_id,
+            case_public_key: self.case_public_key.clone(),
+            server_base_url: self.server_base_url.lock().unwrap().clone(),
+            display_name: self.display_name.lock().unwrap().clone(),
+            company_id,
+            company_name: String::new(),
+            enabled_collectors: vec![
+                "android_bugreport".into(),
+                "ios_sysdiagnose".into(),
+                "message_report".into(),
+            ],
+            noise_key_fingerprint: noise_fp,
+        })
+    }
+
+    /// Capture sibling device keys into history entries and ban those rows.
+    fn absorb_other_devices_for_email(
+        &self,
+        keep_device_id: Uuid,
+        email: &str,
+    ) -> Vec<DeviceKeyHistoryEntry> {
+        let email = email.trim();
+        if email.is_empty() {
+            return Vec::new();
+        }
+        let stale: Vec<DeviceRecord> = self
+            .devices
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|d| d.device_id != keep_device_id && d.email.eq_ignore_ascii_case(email))
+            .cloned()
+            .collect();
+        let mut absorbed = Vec::new();
+        for sibling in stale {
+            absorbed.extend(sibling.key_history.iter().cloned());
+            if !normalize_pk(&sibling.public_key).is_empty() {
+                absorbed.push(history_entry_from_device(
+                    &sibling,
+                    "superseded by re-enrollment",
+                    &sibling.device_id.to_string(),
+                ));
+            }
+            {
+                let mut devices = self.devices.lock().unwrap();
+                if let Some(d) = devices.get_mut(&sibling.device_id) {
+                    d.banned = true;
+                    let _ = persist_device(&self.db, &self.devices_dir, d);
+                }
+            }
+            let pk = normalize_pk(&sibling.public_key);
+            if !pk.is_empty() {
+                let _ = self.ban_public_key(&pk, "superseded by re-enrollment");
+            }
+        }
+        absorbed
     }
 
     pub fn manifest(&self) -> ManifestResponse {
@@ -921,6 +1108,92 @@ impl EnrollmentStore {
 
 fn normalize_pk(pk: &str) -> String {
     pk.trim().to_lowercase()
+}
+
+fn detail_field(details_json: &str, keys: &[&str]) -> String {
+    if details_json.trim().is_empty() {
+        return String::new();
+    }
+    let Ok(serde_json::Value::Object(map)) = serde_json::from_str::<serde_json::Value>(details_json)
+    else {
+        return String::new();
+    };
+    for key in keys {
+        if let Some(v) = map.get(*key).and_then(|x| x.as_str()) {
+            let t = v.trim();
+            if !t.is_empty() {
+                return t.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+fn device_public_view(d: &DeviceRecord, public_key_banned: bool) -> DevicePublicView {
+    DevicePublicView {
+        device_id: d.device_id,
+        case_id: d.case_id,
+        public_key: d.public_key.clone(),
+        noise_key: d.noise_key.clone(),
+        noise_key_fingerprint: d.noise_key_fingerprint.clone(),
+        has_noise_key: !d.noise_key.is_empty(),
+        platform: d.platform.clone(),
+        model: d.model.clone(),
+        os_version: d.os_version.clone(),
+        enrolled_at: d.enrolled_at.clone(),
+        banned: d.banned,
+        public_key_banned,
+        email: d.email.clone(),
+        company_id: d.company_id.clone(),
+        app_version: d.app_version.clone(),
+        manufacturer: d.manufacturer.clone(),
+        brand: d.brand.clone(),
+        device_name: d.device_name.clone(),
+        details_json: d.details_json.clone(),
+        security_patch: detail_field(&d.details_json, &["security_patch"]),
+        api_level: detail_field(&d.details_json, &["api_level", "sdk"]),
+        build_display: detail_field(
+            &d.details_json,
+            &["build_display", "android_build"],
+        ),
+        build_type: detail_field(&d.details_json, &["build_type"]),
+        android_release: detail_field(&d.details_json, &["android_release"]),
+        physical: detail_field(&d.details_json, &["physical"]),
+        low_ram: detail_field(&d.details_json, &["low_ram"]),
+        last_seen_at: d.last_seen_at.clone(),
+        rate_limit_bypass: d.rate_limit_bypass,
+        key_history: d.key_history.clone(),
+    }
+}
+
+fn history_entry_from_device(
+    d: &DeviceRecord,
+    reason: &str,
+    from_device_id: &str,
+) -> DeviceKeyHistoryEntry {
+    DeviceKeyHistoryEntry {
+        replaced_at: now_secs_str(),
+        reason: reason.to_string(),
+        public_key: normalize_pk(&d.public_key),
+        noise_key_fingerprint: d.noise_key_fingerprint.clone(),
+        platform: d.platform.clone(),
+        model: d.model.clone(),
+        app_version: d.app_version.clone(),
+        enrolled_at: d.enrolled_at.clone(),
+        last_seen_at: d.last_seen_at.clone(),
+        from_device_id: from_device_id.to_string(),
+    }
+}
+
+fn encode_key_history(history: &[DeviceKeyHistoryEntry]) -> String {
+    serde_json::to_string(history).unwrap_or_else(|_| "[]".into())
+}
+
+fn decode_key_history(raw: &str) -> Vec<DeviceKeyHistoryEntry> {
+    if raw.trim().is_empty() {
+        return Vec::new();
+    }
+    serde_json::from_str(raw).unwrap_or_default()
 }
 
 /// Merge header-provided device detail keys into `details_json`.
@@ -1011,6 +1284,7 @@ fn persist_device(db: &Db, dir: &Path, record: &DeviceRecord) -> anyhow::Result<
         details_json: record.details_json.clone(),
         last_seen_at: record.last_seen_at.clone(),
         rate_limit_bypass: record.rate_limit_bypass,
+        key_history_json: encode_key_history(&record.key_history),
     })?;
     fs::create_dir_all(dir)?;
     let path = dir.join(format!("{}.json", record.device_id));
@@ -1051,6 +1325,7 @@ fn load_devices_from_db(db: &Db) -> anyhow::Result<Option<HashMap<Uuid, DeviceRe
                 details_json: r.details_json,
                 last_seen_at: r.last_seen_at,
                 rate_limit_bypass: r.rate_limit_bypass,
+                key_history: decode_key_history(&r.key_history_json),
             },
         );
     }

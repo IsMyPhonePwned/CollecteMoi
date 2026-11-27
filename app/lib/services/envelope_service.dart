@@ -89,23 +89,30 @@ class EnvelopeService {
       );
     }
     final id = clientIdentity;
-    final uaPlatform = id.platform.isEmpty ? 'unknown' : id.platform;
-    final uaModel = id.model.isEmpty ? uaPlatform : id.model;
-    final uaVersion = id.appVersion.isEmpty ? 'dev' : id.appVersion;
+    String h(String value, {int maxLen = 120}) =>
+        ApiClient.sanitizeHeaderValue(value, maxLen: maxLen);
+    final uaPlatform = h(id.platform.isEmpty ? 'unknown' : id.platform, maxLen: 32);
+    final uaModel = h(id.model.isEmpty ? uaPlatform : id.model, maxLen: 64);
+    final uaVersion = h(id.appVersion.isEmpty ? 'dev' : id.appVersion, maxLen: 32);
+    final headers = <String, String>{
+      'content-type': 'application/json',
+      'user-agent': 'CollecteMoi/$uaVersion ($uaPlatform; $uaModel)',
+    };
+    void put(String name, String value, {int maxLen = 120}) {
+      final v = h(value, maxLen: maxLen);
+      if (v.isNotEmpty) headers[name] = v;
+    }
+    put('x-device-id', id.deviceId ?? '', maxLen: 80);
+    put('x-app-version', id.appVersion, maxLen: 64);
+    put('x-device-platform', id.platform, maxLen: 32);
+    put('x-device-model', id.model, maxLen: 80);
+    put('x-device-os', id.osVersion, maxLen: 80);
+    put('x-device-manufacturer', id.manufacturer, maxLen: 64);
+    put('x-device-brand', id.brand, maxLen: 64);
+    put('x-device-name', id.name, maxLen: 120);
     final res = await http.post(
       Uri.parse('$base/v1/lab/seal'),
-      headers: {
-        'content-type': 'application/json',
-        'user-agent': 'CollecteMoi/$uaVersion ($uaPlatform; $uaModel)',
-        if ((id.deviceId ?? '').isNotEmpty) 'x-device-id': id.deviceId!,
-        if (id.appVersion.isNotEmpty) 'x-app-version': id.appVersion,
-        if (id.platform.isNotEmpty) 'x-device-platform': id.platform,
-        if (id.model.isNotEmpty) 'x-device-model': id.model,
-        if (id.osVersion.isNotEmpty) 'x-device-os': id.osVersion,
-        if (id.manufacturer.isNotEmpty) 'x-device-manufacturer': id.manufacturer,
-        if (id.brand.isNotEmpty) 'x-device-brand': id.brand,
-        if (id.name.isNotEmpty) 'x-device-name': id.name,
-      },
+      headers: headers,
       body: jsonEncode({
         'plaintext_b64': base64Encode(plaintext),
         'artefact': artefact.apiValue,

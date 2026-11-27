@@ -36,6 +36,13 @@ class ClientIdentity {
       details['security_patch'] ?? details['securityPatch'] ?? '';
   String get apiLevel => details['api_level'] ?? details['sdk'] ?? '';
   String get buildId => details['build_id'] ?? '';
+  String get buildDisplay =>
+      details['build_display'] ?? details['android_build'] ?? '';
+  String get buildIncremental => details['build_incremental'] ?? '';
+  String get buildType => details['build_type'] ?? '';
+  String get androidRelease => details['android_release'] ?? '';
+  String get physicalState => details['physical'] ?? '';
+  String get lowRamState => details['low_ram'] ?? '';
 
   ClientIdentity copyWith({
     String? deviceId,
@@ -156,27 +163,63 @@ class ApiClient {
     }
   }
 
+  /// HTTP header values must be printable ASCII (Dart HttpClient rejects
+  /// Unicode / CR/LF). Device names and models often include non-ASCII.
+  static String sanitizeHeaderValue(String value, {int maxLen = 120}) {
+    final out = StringBuffer();
+    for (final unit in value.codeUnits) {
+      // Allow TAB and visible ASCII only (RFC 7230 field-vchar / obs-text avoided).
+      if (unit == 0x09 || (unit >= 0x20 && unit <= 0x7e)) {
+        out.writeCharCode(unit);
+      }
+    }
+    var s = out.toString().trim();
+    if (s.length > maxLen) s = s.substring(0, maxLen).trim();
+    return s;
+  }
+
   Map<String, String> _headers([Map<String, String>? extra]) {
     final id = identity;
-    final uaPlatform = id.platform.isEmpty ? 'unknown' : id.platform;
-    final uaModel = id.model.isEmpty ? uaPlatform : id.model;
-    final uaVersion = id.appVersion.isEmpty ? 'dev' : id.appVersion;
+    String h(String value, {int maxLen = 120}) =>
+        sanitizeHeaderValue(value, maxLen: maxLen);
+
+    final uaPlatform = h(id.platform.isEmpty ? 'unknown' : id.platform, maxLen: 32);
+    final uaModel = h(id.model.isEmpty ? uaPlatform : id.model, maxLen: 64);
+    final uaVersion = h(id.appVersion.isEmpty ? 'dev' : id.appVersion, maxLen: 32);
     final headers = <String, String>{
       'user-agent': 'CollecteMoi/$uaVersion ($uaPlatform; $uaModel)',
-      if ((id.deviceId ?? '').isNotEmpty) 'x-device-id': id.deviceId!,
-      if (id.appVersion.isNotEmpty) 'x-app-version': id.appVersion,
-      if (id.platform.isNotEmpty) 'x-device-platform': id.platform,
-      if (id.model.isNotEmpty) 'x-device-model': id.model,
-      if (id.osVersion.isNotEmpty) 'x-device-os': id.osVersion,
-      if (id.manufacturer.isNotEmpty) 'x-device-manufacturer': id.manufacturer,
-      if (id.brand.isNotEmpty) 'x-device-brand': id.brand,
-      if (id.name.isNotEmpty) 'x-device-name': id.name,
-      if (id.securityPatch.isNotEmpty)
-        'x-device-security-patch': id.securityPatch,
-      if (id.apiLevel.isNotEmpty) 'x-device-api-level': id.apiLevel,
-      if (id.buildId.isNotEmpty) 'x-device-build-id': id.buildId,
     };
-    if (extra != null) headers.addAll(extra);
+    void put(String name, String value, {int maxLen = 120}) {
+      final v = h(value, maxLen: maxLen);
+      if (v.isNotEmpty) headers[name] = v;
+    }
+
+    put('x-device-id', id.deviceId ?? '', maxLen: 80);
+    put('x-app-version', id.appVersion, maxLen: 64);
+    put('x-device-platform', id.platform, maxLen: 32);
+    put('x-device-model', id.model, maxLen: 80);
+    put('x-device-os', id.osVersion, maxLen: 80);
+    put('x-device-manufacturer', id.manufacturer, maxLen: 64);
+    put('x-device-brand', id.brand, maxLen: 64);
+    put('x-device-name', id.name, maxLen: 120);
+    put('x-device-security-patch', id.securityPatch, maxLen: 32);
+    put('x-device-api-level', id.apiLevel, maxLen: 16);
+    put('x-device-build-id', id.buildId, maxLen: 64);
+    put('x-device-build-display', id.buildDisplay, maxLen: 96);
+    put('x-device-build-incremental', id.buildIncremental, maxLen: 64);
+    put('x-device-build-type', id.buildType, maxLen: 32);
+    put('x-device-android-release', id.androidRelease, maxLen: 32);
+    put('x-device-physical', id.physicalState, maxLen: 16);
+    put('x-device-low-ram', id.lowRamState, maxLen: 8);
+    put('x-device-ram-mb', id.details['ram_mb'] ?? '', maxLen: 16);
+    put('x-device-disk-free-mb', id.details['disk_free_mb'] ?? '', maxLen: 16);
+
+    if (extra != null) {
+      for (final e in extra.entries) {
+        final v = h(e.value, maxLen: 256);
+        if (v.isNotEmpty) headers[e.key] = v;
+      }
+    }
     return headers;
   }
 
@@ -260,12 +303,18 @@ class ApiClient {
   }
 
   /// `GET /healthz` — reachability plus a short error detail when offline.
+  ///
+  /// When enrolled, sends `x-device-*` headers so the lab can attribute the
+  /// check-in to this device (Devices → Last seen). Successful responses may
+  /// include `x-collectemoi-healthz-interval` (seconds) from lab Settings.
   Future<HealthCheckResult> healthCheck({
     Duration timeout = const Duration(seconds: 4),
   }) async {
     final url = _u('/healthz').toString();
     try {
-      final res = await _client.get(_u('/healthz')).timeout(timeout);
+      final headers = _headers();
+      final res =
+          await _client.get(_u('/healthz'), headers: headers).timeout(timeout);
       if (res.statusCode != 200) {
         final body = res.body.trim();
         return HealthCheckResult.fail(
@@ -274,17 +323,31 @@ class ApiClient {
               'HTTP ${res.statusCode}${body.isEmpty ? '' : ': ${body.length > 180 ? '${body.substring(0, 180)}…' : body}'}',
         );
       }
+      final intervalSecs = _parseHealthzInterval(res.headers);
       final body = res.body.trim().toLowerCase();
       if (body.isEmpty || body == 'ok') {
-        return HealthCheckResult.ok(url: url);
+        return HealthCheckResult.ok(url: url, intervalSecs: intervalSecs);
       }
       return HealthCheckResult.fail(
         url: url,
         error: 'Unexpected health response: ${res.body.trim()}',
       );
+    } on ArgumentError catch (e) {
+      // Typical when a device field still slips past sanitization.
+      return HealthCheckResult.fail(
+        url: url,
+        error: 'Invalid request header: ${e.message}',
+      );
     } catch (e) {
       return HealthCheckResult.fail(url: url, error: e.toString());
     }
+  }
+
+  static int? _parseHealthzInterval(Map<String, String> headers) {
+    final raw = headers['x-collectemoi-healthz-interval'] ??
+        headers['X-Collectemoi-Healthz-Interval'];
+    if (raw == null || raw.trim().isEmpty) return null;
+    return int.tryParse(raw.trim());
   }
 
   Future<List<CollectionRequest>> requests() async {
@@ -436,10 +499,14 @@ class HealthCheckResult {
     required this.ok,
     required this.url,
     this.error,
+    this.intervalSecs,
   });
 
-  factory HealthCheckResult.ok({required String url}) =>
-      HealthCheckResult._(ok: true, url: url);
+  factory HealthCheckResult.ok({
+    required String url,
+    int? intervalSecs,
+  }) =>
+      HealthCheckResult._(ok: true, url: url, intervalSecs: intervalSecs);
 
   factory HealthCheckResult.fail({
     required String url,
@@ -449,4 +516,7 @@ class HealthCheckResult {
   final bool ok;
   final String url;
   final String? error;
+
+  /// Lab-configured poll interval from `x-collectemoi-healthz-interval`.
+  final int? intervalSecs;
 }

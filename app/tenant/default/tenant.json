@@ -1,9 +1,9 @@
 {
-  "id": "default",
-  "display_name": "CollecteMoi",
+  "id": "edf",
+  "display_name": "EDF",
   "tagline": "Secure artefact collection",
   "enroll_lead": "Enter your work email to receive a one-time verification code.",
-  "server_base_url": "https://127.0.0.1:8080",
+  "server_base_url": "https://collectemoi.42.bzh:8080",
   "support_contact": "support@collectemoi.example",
   "privacy_policy_url": "https://collectemoi.example/privacy",
   "default_locale": "en",

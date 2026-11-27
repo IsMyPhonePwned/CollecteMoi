@@ -2,12 +2,25 @@
 //! without restarting (bind address still requires restart).
 //!
 //! Mutable lab toggles (`display_name`, `public_url`, `lab_seal`,
-//! `allow_dev_envelope`, OTP webhook) are persisted in SQLite so they
-//! survive restart.
+//! `allow_dev_envelope`, OTP webhook, healthz poll interval) are
+//! persisted in SQLite so they survive restart.
 
 use serde::{Deserialize, Serialize};
 
 pub const SETTINGS_KEY: &str = "runtime_settings";
+
+/// Default mobile `/healthz` poll interval (seconds).
+pub const DEFAULT_HEALTHZ_INTERVAL_SECS: u64 = 60;
+pub const MIN_HEALTHZ_INTERVAL_SECS: u64 = 15;
+pub const MAX_HEALTHZ_INTERVAL_SECS: u64 = 3600;
+
+pub fn clamp_healthz_interval_secs(v: u64) -> u64 {
+    v.clamp(MIN_HEALTHZ_INTERVAL_SECS, MAX_HEALTHZ_INTERVAL_SECS)
+}
+
+fn default_healthz_interval_secs() -> u64 {
+    DEFAULT_HEALTHZ_INTERVAL_SECS
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeSettings {
@@ -31,6 +44,9 @@ pub struct RuntimeSettings {
     /// Optional Bearer token sent as `Authorization` on webhook calls.
     #[serde(default)]
     pub otp_delivery_webhook_token: String,
+    /// How often enrolled apps should poll `GET /healthz` (device check-in).
+    #[serde(default = "default_healthz_interval_secs")]
+    pub healthz_interval_secs: u64,
 }
 
 /// Subset of settings written to SQLite across process restarts.
@@ -48,6 +64,8 @@ pub struct PersistedSettings {
     pub otp_delivery_webhook_url: Option<String>,
     #[serde(default)]
     pub otp_delivery_webhook_token: Option<String>,
+    #[serde(default)]
+    pub healthz_interval_secs: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +76,7 @@ pub struct SettingsPatch {
     pub allow_dev_envelope: Option<bool>,
     pub otp_delivery_webhook_url: Option<String>,
     pub otp_delivery_webhook_token: Option<String>,
+    pub healthz_interval_secs: Option<u64>,
 }
 
 impl RuntimeSettings {
@@ -81,6 +100,9 @@ impl RuntimeSettings {
         }
         if let Some(v) = patch.otp_delivery_webhook_token {
             self.otp_delivery_webhook_token = v.trim().to_string();
+        }
+        if let Some(v) = patch.healthz_interval_secs {
+            self.healthz_interval_secs = clamp_healthz_interval_secs(v);
         }
     }
 
@@ -108,6 +130,9 @@ impl RuntimeSettings {
         if let Some(ref token) = p.otp_delivery_webhook_token {
             self.otp_delivery_webhook_token = token.trim().to_string();
         }
+        if let Some(v) = p.healthz_interval_secs {
+            self.healthz_interval_secs = clamp_healthz_interval_secs(v);
+        }
     }
 
     pub fn to_persisted(&self) -> PersistedSettings {
@@ -118,6 +143,7 @@ impl RuntimeSettings {
             allow_dev_envelope: Some(self.allow_dev_envelope),
             otp_delivery_webhook_url: Some(self.otp_delivery_webhook_url.clone()),
             otp_delivery_webhook_token: Some(self.otp_delivery_webhook_token.clone()),
+            healthz_interval_secs: Some(self.healthz_interval_secs),
         }
     }
 
