@@ -9,6 +9,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile, unlink, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
+import { isIP } from "node:net";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 
@@ -33,7 +34,7 @@ function parseArgs(argv: string[]): Opts {
     apiServer: "https://127.0.0.1:8080",
     sessionPath: resolve("./.collectemoi/session.json"),
     open: false,
-    insecure: true,
+    insecure: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
@@ -81,7 +82,7 @@ Options:
   --port <n>          Listen port (default: 8090)
   --server <url>      CollecteMoi API base URL (default: https://127.0.0.1:8080)
   --session <path>    Session JSON path (default: ./.collectemoi/session.json)
-  --insecure          Trust self-signed API cert (default for lab UI)
+  --insecure          Skip API certificate verification (lab only; off by default)
   --secure            Require a valid TLS certificate
   --tls-ca <pem>      Trust this CA/cert PEM
   --no-open           Do not open a browser tab (default)
@@ -104,8 +105,35 @@ function sendJson(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+    "x-frame-options": "DENY",
   });
   res.end(data);
+}
+
+function isLocalUiRequest(req: IncomingMessage, port: number): boolean {
+  const rawHost = req.headers.host;
+  if (!rawHost) return false;
+  let host: URL;
+  try {
+    host = new URL(`http://${rawHost}`);
+  } catch {
+    return false;
+  }
+  const hostname = host.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (hostname !== "localhost" && isIP(hostname) === 0) return false;
+  const portText = host.port || "80";
+  if (Number(portText) !== port) return false;
+
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try {
+    const parsedOrigin = new URL(origin);
+    return parsedOrigin.origin === host.origin && parsedOrigin.protocol === "http:";
+  } catch {
+    return false;
+  }
 }
 
 async function readBody(req: IncomingMessage): Promise<Buffer> {
@@ -136,7 +164,6 @@ async function publicSession(path: string): Promise<Record<string, unknown> | nu
       enabledCollectors: s.enabledCollectors,
       email: s.email,
       companyId: s.companyId,
-      noiseKeyHex: s.noiseKeyHex,
       noiseKeyFingerprint: s.noiseKeyFingerprint,
       devicePublicKeyHex: s.devicePublicKeyHex,
       casePublicKeyHex: s.casePublicKeyHex,
@@ -162,11 +189,22 @@ async function main() {
 
   const server = createServer(async (req, res) => {
     try {
+      if (!isLocalUiRequest(req, opts.port)) {
+        sendJson(res, 403, { error: "local client UI request rejected" });
+        return;
+      }
       const url = new URL(req.url ?? "/", `http://${opts.bind}:${opts.port}`);
       const path = url.pathname;
 
       if (req.method === "GET" && (path === "/" || path === "/index.html")) {
-        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "referrer-policy": "no-referrer",
+          "x-frame-options": "DENY",
+          "content-security-policy": "frame-ancestors 'none'",
+        });
         res.end(pageHtml);
         return;
       }
@@ -175,7 +213,6 @@ async function main() {
         sendJson(res, 200, {
           session: await publicSession(opts.sessionPath),
           apiServer: opts.apiServer,
-          sessionPath: opts.sessionPath,
         });
         return;
       }
@@ -356,6 +393,9 @@ async function main() {
     console.log(`CollecteMoi client UI → ${url}`);
     console.log(`API server           → ${opts.apiServer}`);
     console.log(`Session              → ${opts.sessionPath}`);
+    if (!new Set(["127.0.0.1", "::1", "localhost"]).has(opts.bind)) {
+      console.warn("Warning: the client UI is bound beyond loopback; expose it only on a trusted network.");
+    }
     if (opts.open) void maybeOpen(url);
   });
 }

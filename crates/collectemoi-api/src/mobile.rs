@@ -35,6 +35,8 @@ pub struct MobileBuild {
     pub branding_version: String,
     pub sha256: String,
     pub size: u64,
+    /// When the artefact was written (file mtime, RFC3339).
+    pub generated_at: String,
     pub modified_at: String,
     pub content_type: String,
     pub path_hint: String,
@@ -67,6 +69,11 @@ struct BuildMeta {
     platform: String,
 }
 
+fn canonicalize_dir(path: PathBuf) -> PathBuf {
+    path.canonicalize().unwrap_or(path)
+}
+
+/// Roots scanned for downloads / find. List UI prefers `data/mobile` only (see `list_roots`).
 fn mobile_roots(state: &AppState) -> Vec<PathBuf> {
     let mut roots = Vec::new();
     if let Ok(raw) = env::var("COLLECTEMOI_MOBILE_DIR") {
@@ -76,13 +83,33 @@ fn mobile_roots(state: &AppState) -> Vec<PathBuf> {
         }
     }
     roots.push(state.data_dir.join("mobile"));
-    // Lab default: <repo>/data → sibling dist/mobile
+    // Lab build output — used as download fallback, not primary listing.
     if let Some(parent) = state.data_dir.parent() {
         roots.push(parent.join("dist").join("mobile"));
     }
-    // CWD fallback when the API is started from the repo root
     roots.push(PathBuf::from("dist/mobile"));
 
+    let mut out = Vec::new();
+    for r in roots {
+        let r = canonicalize_dir(r);
+        if !out.iter().any(|x: &PathBuf| x == &r) {
+            out.push(r);
+        }
+    }
+    out
+}
+
+/// Admin Downloads list: published artefacts under `data/mobile` (+ optional override).
+/// Avoids duplicate rows from also scanning `dist/mobile` (same APK copied to both).
+fn list_roots(state: &AppState) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(raw) = env::var("COLLECTEMOI_MOBILE_DIR") {
+        let t = raw.trim();
+        if !t.is_empty() {
+            roots.push(canonicalize_dir(PathBuf::from(t)));
+        }
+    }
+    roots.push(canonicalize_dir(state.data_dir.join("mobile")));
     let mut out = Vec::new();
     for r in roots {
         if !out.iter().any(|x: &PathBuf| x == &r) {
@@ -182,14 +209,26 @@ fn load_sidecar(path: &Path, size: u64, mtime: u64) -> Option<BuildMeta> {
     if meta.size != size {
         return None;
     }
-    // Allow missing mtime in older sidecars; if present it must match.
-    if meta.mtime_secs != 0 && meta.mtime_secs != mtime {
-        return None;
-    }
     if meta.sha256.len() != 64 || !meta.sha256.chars().all(|c| c.is_ascii_hexdigit()) {
         return None;
     }
-    Some(meta)
+    // Exact mtime match — sidecar still fresh.
+    if meta.mtime_secs == 0 || meta.mtime_secs == mtime {
+        return Some(meta);
+    }
+    // File was copied/touched (e.g. collectemoi-latest.apk alias) — keep sidecar if
+    // content hash still matches, then refresh mtime so we don't re-detect a wrong
+    // version from pubspec fallback.
+    let Ok(sha) = sha256_file(path) else {
+        return None;
+    };
+    if sha != meta.sha256 {
+        return None;
+    }
+    let mut refreshed = meta;
+    refreshed.mtime_secs = mtime;
+    write_sidecar(path, &refreshed);
+    Some(refreshed)
 }
 
 fn write_sidecar(path: &Path, meta: &BuildMeta) {
@@ -383,6 +422,7 @@ fn enrich_build(
         (version, sha256)
     };
 
+    let when = modified_rfc3339(meta_fs);
     MobileBuild {
         name,
         platform,
@@ -391,7 +431,8 @@ fn enrich_build(
         branding_version,
         sha256,
         size,
-        modified_at: modified_rfc3339(meta_fs),
+        generated_at: when.clone(),
+        modified_at: when,
         content_type: content_type_for(
             path.file_name()
                 .and_then(|n| n.to_str())
@@ -469,11 +510,13 @@ fn find_build(
     None
 }
 
-fn scan_builds(state: &AppState) -> Vec<MobileBuild> {
+fn scan_builds_in(_state: &AppState, roots: &[PathBuf]) -> Vec<MobileBuild> {
     let mut builds = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    // Logical key → keep one row (first root wins; list_roots puts data/mobile first).
+    let mut seen_logical = std::collections::HashSet::new();
+    let mut seen_path = std::collections::HashSet::new();
 
-    for root in mobile_roots(state) {
+    for root in roots {
         let mut stack = vec![root.clone()];
         while let Some(dir) = stack.pop() {
             let Ok(entries) = std::fs::read_dir(&dir) else {
@@ -501,12 +544,16 @@ fn scan_builds(state: &AppState) -> Vec<MobileBuild> {
                 let Ok(meta) = entry.metadata() else {
                     continue;
                 };
-                let (company_id, branding_version) = company_scope_from_path(&root, &path);
-                let dedup = format!("{company_id}|{branding_version}|{name}|{}", path.display());
-                if !seen.insert(dedup) {
+                let canon = path.canonicalize().unwrap_or_else(|_| path.clone());
+                if !seen_path.insert(canon.display().to_string()) {
                     continue;
                 }
-                builds.push(enrich_build(&path, name, &meta, &root));
+                let (company_id, branding_version) = company_scope_from_path(root, &path);
+                let logical = format!("{company_id}|{branding_version}|{name}");
+                if !seen_logical.insert(logical) {
+                    continue;
+                }
+                builds.push(enrich_build(&path, name, &meta, root));
             }
         }
     }
@@ -515,9 +562,67 @@ fn scan_builds(state: &AppState) -> Vec<MobileBuild> {
         b.modified_at
             .cmp(&a.modified_at)
             .then_with(|| a.company_id.cmp(&b.company_id))
+            .then_with(|| a.branding_version.cmp(&b.branding_version))
             .then_with(|| a.name.cmp(&b.name))
     });
+
+    // Hide alias rows (latest/debug) when a versioned APK with the same hash exists.
+    let versioned_shas: std::collections::HashSet<String> = builds
+        .iter()
+        .filter(|b| is_versioned_mobile_name(&b.name))
+        .filter(|b| !b.sha256.is_empty())
+        .map(|b| b.sha256.clone())
+        .collect();
+    builds.retain(|b| {
+        if !is_mobile_alias_name(&b.name) {
+            return true;
+        }
+        b.sha256.is_empty() || !versioned_shas.contains(&b.sha256)
+    });
     builds
+}
+
+fn is_versioned_mobile_name(name: &str) -> bool {
+    let stem = name
+        .strip_suffix(".apk")
+        .or_else(|| name.strip_suffix(".ipa"))
+        .or_else(|| name.strip_suffix(".zip"))
+        .unwrap_or(name);
+    let Some(rest) = stem.strip_prefix("collectemoi-") else {
+        return false;
+    };
+    let ver = rest.split(['-', '+']).next().unwrap_or("");
+    let mut parts = ver.split('.');
+    matches!(
+        (parts.next(), parts.next(), parts.next(), parts.next()),
+        (Some(a), Some(b), Some(c), None)
+            if !a.is_empty()
+                && !b.is_empty()
+                && !c.is_empty()
+                && a.chars().all(|ch| ch.is_ascii_digit())
+                && b.chars().all(|ch| ch.is_ascii_digit())
+                && c.chars().all(|ch| ch.is_ascii_digit())
+    )
+}
+
+fn is_mobile_alias_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "collectemoi-latest.apk"
+            | "collectemoi-latest.ipa"
+            | "collectemoi-debug.apk"
+            | "collectemoi-release.apk"
+            | "collectemoi-profile.apk"
+            | "collectemoi-debug.ipa"
+            | "collectemoi-release.ipa"
+            | "collectemoi-profile.ipa"
+    )
+}
+
+fn scan_builds(state: &AppState) -> Vec<MobileBuild> {
+    let roots = list_roots(state);
+    scan_builds_in(state, &roots)
 }
 
 pub async fn list_mobile(
@@ -549,7 +654,7 @@ pub async fn list_mobile(
         "ok": true,
         "builds": builds,
         "company_id": q.company_id,
-        "hint": "Generate from Client apps for a company — artefacts land in data/mobile/<company>/<version>/",
+        "hint": "Brand ver = branding folder; App ver = Flutter --build-name. Aliases (latest/debug) with the same SHA as a versioned APK are hidden. New builds prune older app APKs in that branding folder.",
     })))
 }
 

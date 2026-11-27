@@ -5,11 +5,55 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$ROOT/app"
-OUT="$ROOT/dist/mobile"
-PUBLISH="$ROOT/data/mobile"   # served by admin UI (/v1/admin/mobile)
+# Prefer COLLECTEMOI_DATA_DIR so Docker publishes APKs into the API volume.
+DATA_DIR="${COLLECTEMOI_DATA_DIR:-$ROOT/data}"
+OUT="${COLLECTEMOI_OUT_DIR:-$ROOT/dist/mobile}"
+PUBLISH="$DATA_DIR/mobile"   # served by admin UI (/v1/admin/mobile)
 CTL_VERSION="0.2.0"
 
-export PATH="/opt/homebrew/share/flutter/bin:${PATH:-}"
+# Docker image installs Flutter at /opt/flutter; macOS lab often uses Homebrew.
+export PATH="/opt/flutter/bin:/opt/homebrew/share/flutter/bin:${PATH:-}"
+# Resolve a *full* Android SDK (platforms + build-tools). Homebrew's
+# `android-platform-tools` cask alone is not enough and breaks Gradle/NDK installs.
+_android_sdk_looks_complete() {
+  local root="${1:-}"
+  [[ -n "$root" && -d "$root" ]] || return 1
+  # Reject incomplete trees (e.g. only platform-tools from a Homebrew cask).
+  [[ -d "$root/platforms" || -d "$root/build-tools" || -d "$root/cmdline-tools" ]] || return 1
+  return 0
+}
+_resolve_android_sdk() {
+  local cand
+  for cand in \
+    "${ANDROID_HOME:-}" \
+    "${ANDROID_SDK_ROOT:-}" \
+    "/opt/android-sdk" \
+    "${HOME}/Library/Android/sdk" \
+    "${HOME}/Android/Sdk"
+  do
+    if _android_sdk_looks_complete "$cand"; then
+      printf '%s\n' "$cand"
+      return 0
+    fi
+  done
+  # Fall back to whatever is set so Docker/custom layouts still work.
+  if [[ -n "${ANDROID_HOME:-}" ]]; then
+    printf '%s\n' "$ANDROID_HOME"
+    return 0
+  fi
+  if [[ -n "${ANDROID_SDK_ROOT:-}" ]]; then
+    printf '%s\n' "$ANDROID_SDK_ROOT"
+    return 0
+  fi
+  return 1
+}
+_sdk="$(_resolve_android_sdk 2>/dev/null || true)"
+if [[ -n "${_sdk:-}" ]]; then
+  export ANDROID_HOME="$_sdk"
+  export ANDROID_SDK_ROOT="$_sdk"
+  export PATH="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools:${PATH}"
+fi
+unset _sdk
 
 MODE="debug"          # debug | profile | release
 PLATFORM=""           # android | ios | all (set by subcommand / flags)
@@ -19,7 +63,9 @@ TENANT_DIR=""         # branding dir (tenant.json + theme.json + assets/)
 DISPLAY_NAME=""
 LOGO_PATH=""
 ICON_PATH=""
+ICON_PATH_SET=0       # 1 when --icon was passed on the CLI
 ICON_TEXT=""          # Optional text rendered directly on the launcher image
+ICON_STYLE_SET=0      # 1 when any --icon-text/scale/rotation flag was passed
 ICON_FONT="system"
 ICON_SIZE="14"
 ICON_X="50"
@@ -159,6 +205,38 @@ ensure_out() {
   mkdir -p "$OUT"
 }
 
+# Keep android/local.properties pointed at a usable SDK (Flutter rewrites this
+# from ANDROID_HOME, but a stale Homebrew platform-tools path breaks NDK installs).
+ensure_android_sdk() {
+  local sdk props flutter_sdk
+  sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+  if [[ -z "$sdk" ]]; then
+    sdk="$(_resolve_android_sdk 2>/dev/null || true)"
+  fi
+  if [[ -z "$sdk" ]] || ! _android_sdk_looks_complete "$sdk"; then
+    err "Android SDK not found or incomplete (need platforms/ or build-tools/)"
+    info "set ANDROID_HOME to a full SDK (e.g. \$HOME/Library/Android/sdk) or install via Android Studio"
+    info "Homebrew android-platform-tools alone is not enough"
+    return 1
+  fi
+  export ANDROID_HOME="$sdk"
+  export ANDROID_SDK_ROOT="$sdk"
+  props="$APP/android/local.properties"
+  mkdir -p "$(dirname "$props")"
+  flutter_sdk="$(command -v flutter >/dev/null 2>&1 && dirname "$(dirname "$(command -v flutter)")" || true)"
+  {
+    printf 'sdk.dir=%s\n' "$sdk"
+    if [[ -n "$flutter_sdk" && -d "$flutter_sdk" ]]; then
+      printf 'flutter.sdk=%s\n' "$flutter_sdk"
+    elif [[ -f "$props" ]]; then
+      # Preserve an existing flutter.sdk line if flutter isn't on PATH yet.
+      awk -F= '/^flutter\.sdk=/{print; exit}' "$props"
+    fi
+  } > "${props}.tmp"
+  mv "${props}.tmp" "$props"
+  info "Android SDK  $sdk"
+}
+
 dart_defines() {
   local args=()
   if [[ -n "$SERVER_URL" ]]; then
@@ -253,7 +331,7 @@ apply_branding() {
       done
     fi
     if [[ -z "$ICON_PATH" ]]; then
-      for cand in icon.png icon-1024.png icon.jpg icon.webp; do
+      for cand in icon.png icon-1024.png icon.jpg icon.webp logo.png logo.jpg logo.webp; do
         if [[ -f "$TENANT_DIR/assets/$cand" ]]; then ICON_PATH="$TENANT_DIR/assets/$cand"; break; fi
       done
     fi
@@ -262,6 +340,51 @@ apply_branding() {
     fi
     if [[ -z "$SERVER_URL" && -f "$dest/tenant.json" ]]; then
       SERVER_URL="$(python3 -c "import json;print(json.load(open('$dest/tenant.json')).get('server_base_url',''))" 2>/dev/null || true)"
+    fi
+    # Pull launcher style from theme.json when CLI left defaults.
+    if [[ -f "$TENANT_DIR/theme.json" ]]; then
+      local _theme_icon_source=""
+      _theme_icon_source="$(python3 -c "import json;print((json.load(open('$TENANT_DIR/theme.json')).get('launcher_icon') or {}).get('source','logo'))" 2>/dev/null || echo logo)"
+      if [[ "$ICON_STYLE_SET" -eq 0 ]]; then
+        eval "$(python3 - "$TENANT_DIR/theme.json" <<'PY'
+import json, shlex, sys
+style = (json.load(open(sys.argv[1])).get("launcher_icon") or {})
+if not isinstance(style, dict):
+    raise SystemExit(0)
+def emit(name, value):
+    print(f"{name}={shlex.quote(str(value))}")
+if style.get("enabled") and style.get("text"):
+    emit("ICON_TEXT", str(style.get("text", ""))[:24])
+    emit("ICON_FONT", style.get("font", "system"))
+    emit("ICON_SIZE", style.get("size", 14))
+    emit("ICON_X", style.get("x", 50))
+    emit("ICON_Y", style.get("y", 82))
+    emit("ICON_COLOR", style.get("color", "#FFFFFF"))
+    emit("ICON_BADGE", "true" if style.get("badge", True) else "false")
+    emit("ICON_BADGE_COLOR", style.get("badge_color", "#000000"))
+    emit("ICON_BADGE_OPACITY", style.get("badge_opacity", 72))
+if "scale" in style:
+    emit("ICON_SCALE", style.get("scale", 100))
+if "rotation" in style:
+    emit("ICON_ROTATION", style.get("rotation", 0))
+PY
+)"
+      fi
+      if [[ "$ICON_PATH_SET" -eq 0 ]]; then
+        local _resolved=""
+        if [[ "$_theme_icon_source" == "icon" ]]; then
+          for cand in icon.png icon-1024.png icon.jpg icon.webp logo.png logo.jpg logo.webp; do
+            if [[ -f "$TENANT_DIR/assets/$cand" ]]; then _resolved="$TENANT_DIR/assets/$cand"; break; fi
+          done
+        else
+          for cand in logo.png logo.jpg logo.webp icon.png icon-1024.png icon.jpg icon.webp; do
+            if [[ -f "$TENANT_DIR/assets/$cand" ]]; then _resolved="$TENANT_DIR/assets/$cand"; break; fi
+          done
+        fi
+        if [[ -n "$_resolved" ]]; then
+          ICON_PATH="$_resolved"
+        fi
+      fi
     fi
   fi
 
@@ -313,64 +436,131 @@ PY
     ok "logo  $dest/assets/logo.png"
   fi
 
+  # Prefer an explicit icon, then logo, then the stock Flutter icon.
+  local icon_source=""
+  if [[ -n "$ICON_PATH" && -f "$ICON_PATH" ]]; then
+    icon_source="$ICON_PATH"
+  elif [[ -n "$LOGO_PATH" && -f "$LOGO_PATH" ]]; then
+    icon_source="$LOGO_PATH"
+  elif [[ -f "$APP/web/icons/Icon-512.png" ]]; then
+    icon_source="$APP/web/icons/Icon-512.png"
+  fi
+
   if [[ -n "$ICON_TEXT" || "$ICON_SCALE" != "100" || "$ICON_ROTATION" != "0" ]]; then
     [[ "${#ICON_TEXT}" -le 24 ]] || { err "--icon-text accepts at most 24 characters"; exit 1; }
-    if ! command -v swift >/dev/null 2>&1; then
-      err "launcher image edits require Swift and AppKit (macOS)"
-      exit 1
-    fi
-    local icon_source="$ICON_PATH"
-    if [[ -z "$icon_source" ]]; then
-      icon_source="$APP/web/icons/Icon-512.png"
-    fi
-    [[ -f "$icon_source" ]] || { err "launcher icon not found: $icon_source"; exit 1; }
+    [[ -n "$icon_source" && -f "$icon_source" ]] || { err "launcher icon not found"; exit 1; }
     local overlay_dir
     overlay_dir="$(mktemp -d "${TMPDIR:-/tmp}/cm-icon-text.XXXXXX")"
-    swift "$ROOT/scripts/overlay-icon-text.swift" \
+    if ! render_launcher_icon \
       "$icon_source" "$ICON_TEXT" "$overlay_dir/icon.png" \
       "$ICON_FONT" "$ICON_SIZE" "$ICON_X" "$ICON_Y" "$ICON_COLOR" \
       "$ICON_BADGE" "$ICON_BADGE_COLOR" "$ICON_BADGE_OPACITY" \
-      "$ICON_SCALE" "$ICON_ROTATION"
+      "$ICON_SCALE" "$ICON_ROTATION"; then
+      err "launcher image edits require Swift (macOS) or Python Pillow (Linux/Docker)"
+      exit 1
+    fi
     apply_launcher_icon "$overlay_dir/icon.png"
     rm -rf "$overlay_dir"
-  elif [[ -n "$ICON_PATH" && -f "$ICON_PATH" ]]; then
-    apply_launcher_icon "$ICON_PATH"
-  elif [[ -f "$APP/web/icons/Icon-512.png" ]]; then
-    # Reset a prior generated text treatment when building without an uploaded icon.
-    apply_launcher_icon "$APP/web/icons/Icon-512.png"
+  elif [[ -n "$icon_source" && -f "$icon_source" ]]; then
+    # Only rewrite mipmaps when branding supplied an icon/logo; leave stock
+    # icons alone for plain builds so a prior branded tree is not clobbered
+    # unless TENANT_DIR / --icon / --logo was passed.
+    if [[ -n "$TENANT_DIR" || -n "$ICON_PATH" || -n "$LOGO_PATH" ]]; then
+      apply_launcher_icon "$icon_source"
+    fi
   fi
+}
+
+# Render launcher artwork (Swift on macOS, Pillow on Linux/Docker).
+render_launcher_icon() {
+  local src="$1" text="$2" out="$3"
+  shift 3
+  if command -v swift >/dev/null 2>&1; then
+    swift "$ROOT/scripts/overlay-icon-text.swift" "$src" "$text" "$out" "$@"
+    return $?
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 "$ROOT/scripts/overlay-icon-text.py" "$src" "$text" "$out" "$@"
+    return $?
+  fi
+  return 1
+}
+
+resize_png() {
+  local src="$1" out="$2" side="$3"
+  if command -v sips >/dev/null 2>&1; then
+    sips -z "$side" "$side" "$src" --out "$out" >/dev/null 2>&1
+    return $?
+  fi
+  if command -v magick >/dev/null 2>&1; then
+    magick "$src" -resize "${side}x${side}" "$out"
+    return $?
+  fi
+  if command -v convert >/dev/null 2>&1; then
+    convert "$src" -resize "${side}x${side}" "$out"
+    return $?
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$src" "$out" "$side" <<'PY'
+from PIL import Image
+import sys
+src, out, side = sys.argv[1], sys.argv[2], int(sys.argv[3])
+Image.open(src).convert("RGBA").resize((side, side), Image.Resampling.LANCZOS).save(out, format="PNG")
+PY
+    return $?
+  fi
+  return 1
+}
+
+# Fit src into a square PNG without stretching (letterbox / pillarbox).
+normalize_square_icon() {
+  local src="$1"
+  local out="$2"
+  local side="${3:-1024}"
+  if render_launcher_icon \
+    "$src" "" "$out" \
+    system 14 50 82 "#FFFFFF" false "#000000" 0 100 0; then
+    return 0
+  fi
+  if command -v sips >/dev/null 2>&1; then
+    # Fallback: may distort on old sips.
+    sips -z "$side" "$side" "$src" --out "$out" >/dev/null 2>&1
+    return $?
+  fi
+  cp -f "$src" "$out"
 }
 
 apply_launcher_icon() {
   local src="$1"
   info "launcher icon from $src"
-  if ! command -v sips >/dev/null 2>&1; then
-    warn "sips missing — skip launcher icon resize"
-    return 0
-  fi
   local tmp
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/cm-icon.XXXXXX")"
+  local square="$tmp/square.png"
+  # Always normalize to a square first so wide logos are not stretched.
+  if ! normalize_square_icon "$src" "$square" 1024; then
+    warn "could not normalize launcher icon — using source as-is"
+    square="$src"
+  fi
   # Android mipmap sizes
   local -a sizes=(48 72 96 144 192)
   local -a folders=(mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi)
-  local i
+  local i resized=0
   for i in "${!sizes[@]}"; do
     local out="$APP/android/app/src/main/res/${folders[$i]}/ic_launcher.png"
     mkdir -p "$(dirname "$out")"
-    sips -z "${sizes[$i]}" "${sizes[$i]}" "$src" --out "$out" >/dev/null 2>&1 || true
+    if resize_png "$square" "$out" "${sizes[$i]}"; then
+      resized=1
+    fi
   done
   # iOS AppIcon — write a few common sizes into Assets if present
   local ios_icon_dir="$APP/ios/Runner/Assets.xcassets/AppIcon.appiconset"
   if [[ -d "$ios_icon_dir" ]]; then
-    sips -z 1024 1024 "$src" --out "$tmp/AppIcon-1024.png" >/dev/null 2>&1 || true
-    if [[ -f "$tmp/AppIcon-1024.png" ]]; then
-      # Replace any existing pngs with resized copies where filenames match common patterns
+    if resize_png "$square" "$tmp/AppIcon-1024.png" 1024; then
       local f
       for f in "$ios_icon_dir"/*.png; do
         [[ -f "$f" ]] || continue
         local base
         base="$(basename "$f")"
-        # Heuristic sizes from filename
         local sz=180
         case "$base" in
           *1024*) sz=1024 ;;
@@ -384,13 +574,18 @@ apply_launcher_icon() {
           *29*) sz=29 ;;
           *20*) sz=20 ;;
         esac
-        sips -z "$sz" "$sz" "$tmp/AppIcon-1024.png" --out "$f" >/dev/null 2>&1 || true
+        resize_png "$tmp/AppIcon-1024.png" "$f" "$sz" || true
       done
       cp -f "$tmp/AppIcon-1024.png" "$ios_icon_dir/Icon-App-1024x1024@1x.png" 2>/dev/null || true
+      resized=1
     fi
   fi
   rm -rf "$tmp"
-  ok "launcher icons updated"
+  if [[ "$resized" -eq 1 ]]; then
+    ok "launcher icons updated"
+  else
+    warn "no image resizer (sips/ImageMagick/Pillow) — launcher icons unchanged"
+  fi
 }
 
 maybe_clean() {
@@ -517,6 +712,11 @@ cmd_doctor() {
   kv "app" "$APP"
   kv "out" "$OUT"
   kv "admin" "$PUBLISH"
+  if ensure_android_sdk >/dev/null 2>&1; then
+    kv "android-sdk" "$ANDROID_SDK_ROOT"
+  else
+    kv "android-sdk" "missing / incomplete"
+  fi
   if command -v adb >/dev/null 2>&1; then
     kv "adb" "$(command -v adb)"
   else
@@ -604,6 +804,7 @@ cmd_install() {
 build_android() {
   require_flutter
   require_app
+  ensure_android_sdk || exit 1
   maybe_clean
   apply_branding
   flutter_pub_get
@@ -642,9 +843,28 @@ build_android() {
 
   local dest="$OUT/$(artefact_basename apk)"
   copy_apk "$built" "$dest"
-  # Also keep a stable latest alias for install
+  # Stable latest alias for install — same bytes as $dest, keep meta version/sha in sync.
   cp -f "$dest" "$OUT/collectemoi-latest.apk"
-  publish_build "$OUT/collectemoi-latest.apk"
+  if [[ -f "$dest.meta.json" ]]; then
+    python3 - "$dest.meta.json" "$OUT/collectemoi-latest.apk" <<'PY'
+import json, os, sys
+src_meta, latest = sys.argv[1], sys.argv[2]
+meta = json.load(open(src_meta, encoding="utf-8"))
+meta["name"] = os.path.basename(latest)
+meta["size"] = os.path.getsize(latest)
+meta["mtime_secs"] = int(os.path.getmtime(latest))
+out = latest + ".meta.json"
+with open(out, "w", encoding="utf-8") as f:
+    json.dump(meta, f, indent=2)
+    f.write("\n")
+PY
+    mkdir -p "$PUBLISH"
+    cp -f "$OUT/collectemoi-latest.apk" "$PUBLISH/"
+    cp -f "$OUT/collectemoi-latest.apk.meta.json" "$PUBLISH/"
+    ok "admin  $PUBLISH/collectemoi-latest.apk  (alias of $(basename "$dest"))"
+  else
+    publish_build "$OUT/collectemoi-latest.apk"
+  fi
 
   if [[ "$INSTALL" -eq 1 ]]; then
     cmd_install
@@ -835,14 +1055,14 @@ parse_opts() {
       --app-version) APP_VERSION="$2"; shift 2 ;;
       --build-number) BUILD_NUMBER="$2"; shift 2 ;;
       --logo) LOGO_PATH="$2"; shift 2 ;;
-      --icon) ICON_PATH="$2"; shift 2 ;;
-      --icon-text) ICON_TEXT="$2"; shift 2 ;;
+      --icon) ICON_PATH="$2"; ICON_PATH_SET=1; shift 2 ;;
+      --icon-text) ICON_TEXT="$2"; ICON_STYLE_SET=1; shift 2 ;;
       --icon-font) ICON_FONT="$2"; shift 2 ;;
       --icon-size) ICON_SIZE="$2"; shift 2 ;;
       --icon-x) ICON_X="$2"; shift 2 ;;
       --icon-y) ICON_Y="$2"; shift 2 ;;
-      --icon-scale) ICON_SCALE="$2"; shift 2 ;;
-      --icon-rotation) ICON_ROTATION="$2"; shift 2 ;;
+      --icon-scale) ICON_SCALE="$2"; ICON_STYLE_SET=1; shift 2 ;;
+      --icon-rotation) ICON_ROTATION="$2"; ICON_STYLE_SET=1; shift 2 ;;
       --icon-color) ICON_COLOR="$2"; shift 2 ;;
       --icon-badge) ICON_BADGE="$2"; shift 2 ;;
       --icon-badge-color) ICON_BADGE_COLOR="$2"; shift 2 ;;

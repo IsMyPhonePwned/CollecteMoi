@@ -13,7 +13,7 @@ use crate::Db;
 impl Db {
     /// Import legacy on-disk catalogues if the SQL tables are empty.
     pub fn import_legacy_files(&self, data_dir: &Path) -> Result<ImportStats> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let mut stats = ImportStats::default();
 
         if table_empty(&conn, "companies")? {
@@ -21,11 +21,22 @@ impl Db {
                 &conn,
                 &data_dir.join("companies.json"),
                 |c, v| {
+                    let company_id = v.get("id").and_then(|x| x.as_str()).unwrap_or("");
+                    let max_devices = v
+                        .get("max_devices_per_email")
+                        .and_then(|x| x.as_u64())
+                        .unwrap_or(if company_id == "lab" { 0 } else { 1 })
+                        as i64;
+                    let uploads_per_hour = v
+                        .get("device_uploads_per_hour")
+                        .and_then(|x| x.as_u64())
+                        .unwrap_or(if company_id == "lab" { 0 } else { 10 })
+                        as i64;
                     c.execute(
-                        "INSERT OR IGNORE INTO companies (id, name, domains_json, case_id, enabled, updated_at, color)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        "INSERT OR IGNORE INTO companies (id, name, domains_json, case_id, enabled, updated_at, color, max_devices_per_email, device_uploads_per_hour)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                         params![
-                            v.get("id").and_then(|x| x.as_str()).unwrap_or(""),
+                            company_id,
                             v.get("name").and_then(|x| x.as_str()).unwrap_or(""),
                             v.get("domains").cloned().unwrap_or(Value::Array(vec![])).to_string(),
                             v.get("case_id").and_then(|x| x.as_str()).unwrap_or(""),
@@ -36,6 +47,8 @@ impl Db {
                             },
                             v.get("updated_at").and_then(|x| x.as_str()).unwrap_or(""),
                             v.get("color").and_then(|x| x.as_str()).unwrap_or(""),
+                            max_devices,
+                            uploads_per_hour,
                         ],
                     )?;
                     Ok(())
@@ -169,8 +182,8 @@ impl Db {
                 c.execute(
                     "INSERT INTO access_events (
                             ts, method, path, status, duration_ms, remote, user_agent,
-                            device_id, kind, resource_id
-                         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+                            device_id, kind, resource_id, is_admin, admin_user
+                         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
                     params![
                         v.get("ts").and_then(|x| x.as_str()).unwrap_or(""),
                         v.get("method").and_then(|x| x.as_str()).unwrap_or(""),
@@ -182,6 +195,12 @@ impl Db {
                         v.get("device_id").and_then(|x| x.as_str()).unwrap_or(""),
                         v.get("kind").and_then(|x| x.as_str()).unwrap_or(""),
                         v.get("resource_id").and_then(|x| x.as_str()).unwrap_or(""),
+                        if v.get("is_admin").and_then(|x| x.as_bool()).unwrap_or(false) {
+                            1
+                        } else {
+                            0
+                        },
+                        v.get("admin_user").and_then(|x| x.as_str()).unwrap_or(""),
                     ],
                 )?;
                 Ok(())

@@ -45,13 +45,33 @@ async function jsonFetch<T>(
 }
 
 export class CollecteMoiClient {
-  constructor(public server: string) {
+  constructor(
+    public server: string,
+    public appVersion = "0.1.0",
+  ) {
     this.server = server.replace(/\/$/, "");
   }
 
-  private deviceHeaders(session?: Session | null): Record<string, string> {
-    const id = session?.deviceId;
-    return id ? { "x-device-id": id } : {};
+  private deviceHeaders(
+    session?: Session | null,
+    extra?: {
+      platform?: string;
+      model?: string;
+      osVersion?: string;
+    },
+  ): Record<string, string> {
+    const platform = extra?.platform ?? "desktop";
+    const model = extra?.model ?? process.platform;
+    const osVersion = extra?.osVersion ?? process.version;
+    const headers: Record<string, string> = {
+      "user-agent": `CollecteMoi/${this.appVersion} (${platform}; ${model})`,
+      "x-app-version": this.appVersion,
+      "x-device-platform": platform,
+      "x-device-model": model,
+      "x-device-os": osVersion,
+    };
+    if (session?.deviceId) headers["x-device-id"] = session.deviceId;
+    return headers;
   }
 
   async healthz(): Promise<string> {
@@ -78,7 +98,7 @@ export class CollecteMoiClient {
       method: "POST",
       headers: {
         "content-type": "application/octet-stream",
-        "x-device-id": session.deviceId,
+        ...this.deviceHeaders(session),
       },
       body: proof,
     });
@@ -109,7 +129,10 @@ export class CollecteMoiClient {
       message: string;
     }>(`${this.server}/v1/enroll/start`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...this.deviceHeaders(),
+      },
       body: JSON.stringify({
         email: opts.email,
         lab_key: opts.labKey,
@@ -149,7 +172,14 @@ export class CollecteMoiClient {
       noise_key_fingerprint: string;
     }>(`${this.server}/v1/enroll/confirm`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...this.deviceHeaders(null, {
+          platform: opts.platform,
+          model: opts.model,
+          osVersion: opts.osVersion,
+        }),
+      },
       body: JSON.stringify({
         challenge_id: opts.challengeId,
         code: opts.code,
@@ -158,6 +188,7 @@ export class CollecteMoiClient {
         platform: opts.platform ?? "desktop",
         model: opts.model ?? process.platform,
         os_version: opts.osVersion ?? process.version,
+        app_version: this.appVersion,
       }),
       expect: [201],
     });
@@ -229,7 +260,14 @@ export class CollecteMoiClient {
       noise_key_fingerprint: string;
     }>(`${this.server}/v1/enroll`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...this.deviceHeaders(null, {
+          platform: opts.platform,
+          model: opts.model,
+          osVersion: opts.osVersion,
+        }),
+      },
       body: JSON.stringify({
         token: opts.token,
         device_public_key: keys.publicKeyHex,
@@ -237,6 +275,7 @@ export class CollecteMoiClient {
         platform: opts.platform ?? "desktop",
         model: opts.model ?? process.platform,
         os_version: opts.osVersion ?? process.version,
+        app_version: this.appVersion,
       }),
       expect: [201],
     });
@@ -267,7 +306,10 @@ export class CollecteMoiClient {
       `${this.server}/v1/lab/seal`,
       {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...this.deviceHeaders(),
+        },
         body: JSON.stringify({
           plaintext_b64: Buffer.from(opts.plaintext).toString("base64"),
           artefact: opts.artefact,

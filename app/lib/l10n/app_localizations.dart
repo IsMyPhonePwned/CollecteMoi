@@ -1,4 +1,9 @@
+import 'dart:ui' show PlatformDispatcher;
+
 import 'package:flutter/widgets.dart';
+import 'package:provider/provider.dart';
+
+import '../config/tenant_config.dart';
 
 /// The app UI follows the device language when it is supported.
 const appSupportedLocales = <Locale>[
@@ -11,7 +16,92 @@ class AppLocalizations {
   static const _translations = <String, Map<String, String>>{
     'fr': {
       'Choose light or dark theme': 'Choisir le thème clair ou sombre',
-      'Dark': 'Sombre', 'Light': 'Clair',
+      'Choose light, dark, or system theme': 'Choisir le thème clair, sombre ou système',
+      'Dark': 'Sombre', 'Light': 'Clair', 'System': 'Système',
+      'Follows this phone’s light or dark setting by default.': 'Suit par défaut le mode clair ou sombre du téléphone.',
+      'This device': 'Cet appareil',
+      'App version {version}': 'Version de l’application {version}',
+      'About': 'À propos',
+      'Settings': 'Réglages',
+      'Appearance': 'Apparence',
+      'Server': 'Serveur',
+      'Server online': 'Serveur en ligne',
+      'Server offline': 'Serveur hors ligne',
+      'Checking server…': 'Vérification du serveur…',
+      'Server status unknown': 'État du serveur inconnu',
+      'Server status': 'État du serveur',
+      'Last check: {when}': 'Dernière vérification : {when}',
+      'Not checked yet': 'Pas encore vérifié',
+      'Endpoint': 'Point d’accès',
+      'Error details': 'Détails de l’erreur',
+      'The lab API answered /healthz successfully.':
+          'L’API du laboratoire a répondu correctement à /healthz.',
+      'Check again': 'Vérifier à nouveau',
+      'Copy error': 'Copier l’erreur',
+      'Error copied': 'Erreur copiée',
+      'Close': 'Fermer',
+      '{artefact} uploaded successfully': '{artefact} envoyé avec succès',
+      '{artefact} upload failed': 'Échec de l’envoi de {artefact}',
+      'Enrollment': 'Inscription',
+      'Change the CollecteMoi API address used for enrollment. Builds generated with a server URL hide this field on the enroll screen.':
+          'Modifiez l’adresse de l’API CollecteMoi utilisée pour l’inscription. Les builds générés avec une URL de serveur masquent ce champ sur l’écran d’inscription.',
+      'Enter a valid server URL (https://…)': 'Saisissez une URL de serveur valide (https://…)',
+      'Server URL saved': 'URL du serveur enregistrée',
+      'Save server URL': 'Enregistrer l’URL du serveur',
+      'Lab': 'Laboratoire',
+      'Lab name': 'Nom du laboratoire',
+      'The lab name comes from your company branding on the server and cannot be changed in the app.':
+          'Le nom du laboratoire vient de la marque de votre entreprise sur le serveur et ne peut pas être modifié dans l’application.',
+      'Not set': 'Non défini',
+      '{count} screenshot(s) could not be loaded into memory':
+          '{count} capture(s) n’ont pas pu être chargées en mémoire',
+      'Company': 'Entreprise',
+      'Device ID': 'ID appareil',
+      'Platform': 'Plateforme',
+      'Manufacturer': 'Fabricant',
+      'Brand': 'Marque',
+      'Model': 'Modèle',
+      'Device name': 'Nom de l’appareil',
+      'OS version': 'Version du système',
+      'Captured at enrollment on this phone.': 'Collecté à l’inscription sur ce téléphone.',
+      'Device details were not stored for this enrollment. Re-enroll to capture them.': 'Les détails de l’appareil n’ont pas été enregistrés pour cette inscription. Réinscrivez-vous pour les collecter.',
+      'Android SDK': 'SDK Android',
+      'API level': 'Niveau d’API',
+      'Security patch': 'Correctif de sécurité',
+      'OS / system': 'OS / système',
+      'Android release': 'Version Android',
+      'Build incremental': 'Build incrémental',
+      'Build ID': 'ID de build',
+      'Build display': 'Build affiché',
+      'Build type': 'Type de build',
+      'Build tags': 'Tags de build',
+      'Build host': 'Hôte de build',
+      'Base OS': 'OS de base',
+      'Codename': 'Nom de code',
+      'Board': 'Carte',
+      'Bootloader': 'Bootloader',
+      'ABIs': 'ABI',
+      'iOS version': 'Version iOS',
+      'Model name': 'Nom du modèle',
+      'Machine': 'Machine',
+      'Darwin release': 'Version Darwin',
+      'Darwin version': 'Build Darwin',
+      'Physical device': 'Appareil physique',
+      'Product': 'Produit',
+      'Hardware': 'Matériel',
+      'OS name': 'Nom du système',
+      'Model id': 'ID modèle',
+      'Localized model': 'Modèle localisé',
+      'Vendor ID': 'ID fournisseur',
+      'Browser vendor': 'Fournisseur du navigateur',
+      'Language': 'Langue',
+      'Show lab key': 'Afficher la clé de laboratoire',
+      'For lab testing only. Keep this off for normal enrollment with a work email.': 'Réservé aux tests en laboratoire. Laissez désactivé pour une inscription normale avec une adresse professionnelle.',
+      'Trust self-signed certificate': 'Faire confiance au certificat auto-signé',
+      'Allow HTTPS to a lab server that uses a self-signed TLS certificate. Turn this off for production servers with a trusted certificate.': 'Autorise le HTTPS vers un serveur de laboratoire avec un certificat TLS auto-signé. Désactivez ceci pour les serveurs de production avec un certificat de confiance.',
+      'Needed for lab servers with a self-signed HTTPS certificate.': 'Nécessaire pour les serveurs de laboratoire avec un certificat HTTPS auto-signé.',
+      'Enter a work email': 'Saisissez une adresse professionnelle',
+      'Enter your work email to receive a one-time verification code.': 'Saisissez votre adresse professionnelle pour recevoir un code de vérification à usage unique.',
       'Submission history and My data': 'Historique des envois et Mes données',
       'Lab client': 'Client de laboratoire',
       'Enrolled against {url}. Use Lab file upload to push a test artefact through the same chunked protocol.': 'Inscrit auprès de {url}. Utilisez le téléversement de laboratoire pour envoyer un fichier de test avec le même protocole.',
@@ -22,6 +112,11 @@ class AppLocalizations {
       'Pick any file and submit via the upload API': 'Choisissez un fichier et envoyez-le via l’API',
       ' (guide preview)': ' (aperçu du guide)',
       '{count} / {total} uploads finished': '{count} / {total} envois terminés',
+      '{failed} failed — see list below': '{failed} en échec — voir la liste ci-dessous',
+      '{failed} failed — open My data': '{failed} en échec — ouvrir Mes données',
+      'Failed ({count})': 'Échecs ({count})',
+      'Other uploads': 'Autres envois',
+      'Open': 'Ouvrir',
       'Some uploads need consent or a retry': 'Certains envois attendent votre accord ou une nouvelle tentative',
       'My data': 'Mes données',
       'No artefact types on this request': 'Aucun type de fichier dans cette demande',
@@ -40,6 +135,14 @@ class AppLocalizations {
       'The captured file is no longer on this phone. Go back and share or import it again.': 'Le fichier capturé n’est plus sur ce téléphone. Revenez en arrière pour le partager ou l’importer à nouveau.',
       'Ready to encrypt — file kept on this phone until upload finishes.': 'Prêt à chiffrer — le fichier reste sur ce téléphone jusqu’à la fin de l’envoi.',
       'Back to home': 'Retour à l’accueil', 'Upload failed': 'Échec de l’envoi',
+      'Upload complete': 'Envoi terminé',
+      'Encrypting…': 'Chiffrement…',
+      'Uploading…': 'Envoi…',
+      'Uploading… {pct}%': 'Envoi… {pct} %',
+      '{artefact} was sent to the lab.': '{artefact} a été envoyé au laboratoire.',
+      '{artefact} could not be sent.': 'Impossible d’envoyer {artefact}.',
+      'CollecteMoi is sending a file in the background.':
+          'CollecteMoi envoie un fichier en arrière-plan.',
       'Lab file client': 'Client de fichiers de laboratoire', 'Web lab client': 'Client web de laboratoire',
       'Enroll with token demo, then pick a file (bugreport ZIP, sysdiagnose archive, or any test blob) and send it through the same consent + chunked upload path as the phone app.': 'Inscrivez-vous avec le jeton demo, choisissez un fichier (ZIP bugreport, archive sysdiagnose ou fichier de test), puis envoyez-le avec le même parcours de consentement et de transfert que sur mobile.',
       'Artefact kind': 'Type de fichier', 'Choose file': 'Choisir un fichier',
@@ -64,6 +167,38 @@ class AppLocalizations {
       'Discard this artefact?': 'Supprimer ce fichier ?',
       'Removes the local copy and job record from this phone.': 'Supprime la copie locale et la tâche de ce téléphone.',
       'Discard': 'Supprimer', 'Retry upload': 'Réessayer l’envoi',
+      'Resend': 'Renvoyer',
+      'Resend all': 'Tout renvoyer',
+      'Resending in the background…': 'Nouvel envoi en arrière-plan…',
+      'Delete': 'Supprimer',
+      'Delete all failed': 'Supprimer tous les échecs',
+      'Delete all failed items?': 'Supprimer tous les éléments en échec ?',
+      'Delete this failed item?': 'Supprimer cet élément en échec ?',
+      'Removes this message or file from this phone. The lab is not changed.':
+          'Supprime ce message ou fichier de ce téléphone. Le laboratoire n’est pas modifié.',
+      'Removes failed messages and files from this phone only. Nothing already received by the lab is erased.':
+          'Supprime les messages et fichiers en échec de ce téléphone uniquement. Rien de déjà reçu par le laboratoire n’est effacé.',
+      'Deleted {count} failed item(s)': '{count} élément(s) en échec supprimé(s)',
+      'Failed item deleted': 'Élément en échec supprimé',
+      'Item discarded': 'Élément ignoré',
+      'Some items did not reach the lab. You can resend them without capturing again.':
+          'Certains éléments n’ont pas atteint le laboratoire. Vous pouvez les renvoyer sans les capturer à nouveau.',
+      'Some items did not reach the lab. You can resend them without capturing again, or delete them from this phone.':
+          'Certains éléments n’ont pas atteint le laboratoire. Vous pouvez les renvoyer sans les capturer à nouveau, ou les supprimer de ce téléphone.',
+      'Some items failed — open My data to Resend':
+          'Certains envois ont échoué — ouvrez Mes données pour renvoyer',
+      'This phone was blocked by the lab. Contact your administrator, then tap Resend.':
+          'Ce téléphone a été bloqué par le laboratoire. Contactez votre administrateur, puis appuyez sur Renvoyer.',
+      'Network problem — tap Resend to try again.':
+          'Problème réseau — appuyez sur Renvoyer pour réessayer.',
+      'Network or server problem — tap Resend to try again.':
+          'Problème réseau ou serveur — appuyez sur Renvoyer pour réessayer.',
+      'Too many requests — wait a moment, then tap Resend.':
+          'Trop de requêtes — patientez un instant, puis appuyez sur Renvoyer.',
+      'Upload limit reached (too many reports from this phone). Wait and try again later.':
+          'Limite d’envoi atteinte (trop de signalements depuis ce téléphone). Réessayez plus tard.',
+      'Upload failed — tap Resend to try again.':
+          'Échec de l’envoi — appuyez sur Renvoyer pour réessayer.',
       'Waiting for consent': 'En attente de votre accord', 'Queued': 'Dans la file d’attente',
       'Encrypting': 'Chiffrement', 'Uploading': 'Envoi en cours', 'Sent': 'Envoyé', 'Failed': 'Échec',
       'Add message text or a screenshot.': 'Ajoutez le texte du message ou une capture d’écran.',
@@ -73,6 +208,25 @@ class AppLocalizations {
       'Why it looks suspicious': 'Pourquoi ce message semble suspect',
       'I clicked a link': 'J’ai cliqué sur un lien', 'I replied': 'J’ai répondu',
       'Add screenshots': 'Ajouter des captures d’écran', '{count} screenshot(s) attached': '{count} capture(s) jointe(s)',
+      'Message preview': 'Aperçu du message',
+      'From': 'De',
+      'Message': 'Message',
+      'No message text': 'Aucun texte de message',
+      'Screenshots': 'Captures d’écran',
+      '{count} screenshot(s)': '{count} capture(s)',
+      'Clicked a link': 'Lien cliqué',
+      'Replied': 'Répondu',
+      'How this will look when reported': 'Aperçu de ce qui sera signalé',
+      'Hide preview': 'Masquer l’aperçu',
+      'Show preview': 'Afficher l’aperçu',
+      'Upload started in the background. You can leave this screen — progress is on My data.':
+          'Envoi démarré en arrière-plan. Vous pouvez quitter cet écran — la progression est dans Mes données.',
+      'Upload already in progress…': 'Envoi déjà en cours…',
+      'After you confirm, encryption and upload continue in the background. You can use other apps — Android shows a notification until it finishes.':
+          'Après confirmation, le chiffrement et l’envoi continuent en arrière-plan. Vous pouvez utiliser d’autres apps — Android affiche une notification jusqu’à la fin.',
+      'Encrypting in the background…': 'Chiffrement en arrière-plan…',
+      'Uploading in the background…': 'Envoi en arrière-plan…',
+      'You can leave the app — tap for details': 'Vous pouvez quitter l’app — touchez pour les détails',
       'Step {step} of {total}': 'Étape {step} sur {total}',
       'Check this phone': 'Vérifier ce téléphone', 'Open device info': 'Ouvrir les informations de l’appareil',
       'Open developer settings': 'Ouvrir les paramètres développeur', 'I started the bug report': 'J’ai lancé le rapport de bugs',
@@ -109,6 +263,43 @@ class AppLocalizations {
       'Prepare the phone': 'Préparer le téléphone',
       'Unlock the phone, connect to Wi‑Fi, and charge above 30%. Sysdiagnose is heavy on CPU and storage.': 'Déverrouillez le téléphone, connectez-le au Wi-Fi et chargez-le au-dessus de 30 %. Le sysdiagnose sollicite fortement le processeur et le stockage.',
       'Settings → About phone → Build number × 7': 'Paramètres → À propos du téléphone → Numéro de build × 7',
+      'Samsung — dial *#9900# → dumpstate → Copy to sdcard → /log':
+          'Samsung — composer *#9900# → dumpstate → Copy to sdcard → /log',
+      'Samsung dumpstate guide (no Developer options)':
+          'Guide dumpstate Samsung (sans options développeur)',
+      'On Samsung phones without Developer options, use the Samsung dumpstate guide instead.':
+          'Sur les téléphones Samsung sans options développeur, utilisez plutôt le guide dumpstate Samsung.',
+      'Use Developer options instead': 'Utiliser les options développeur à la place',
+      'Start Samsung guide': 'Démarrer le guide Samsung',
+      'Samsung dumpstate (no Developer options)':
+          'Dumpstate Samsung (sans options développeur)',
+      'This path uses Samsung’s dialer code to write a dumpstate to storage. You do not need Developer options or “Take bug report”.':
+          'Ce parcours utilise le code du composeur Samsung pour écrire un dumpstate sur le stockage. Pas besoin des options développeur ni de « Créer un rapport de bugs ».',
+      'Open the Phone dialer': 'Ouvrir le composeur téléphone',
+      'Open the Phone / Dialer app (not this app). Type *#9900# and open the SysDump / dumpstate menu that appears. Menus differ slightly by One UI version.':
+          'Ouvrez l’application Téléphone / Composeur (pas cette appli). Tapez *#9900# et ouvrez le menu SysDump / dumpstate. Les libellés varient selon la version One UI.',
+      'Phone → dial *#9900#': 'Téléphone → composer *#9900#',
+      'I dialed *#9900#': 'J’ai composé *#9900#',
+      'Run dumpstate': 'Lancer le dumpstate',
+      'In the menu, choose Run dumpstate/logcat (wording may be SysDump, Dumpstate, or similar). Wait while Samsung collects logs — keep the screen on.':
+          'Dans le menu, choisissez Run dumpstate/logcat (parfois SysDump, Dumpstate…). Attendez la collecte — laissez l’écran allumé.',
+      '*#9900# → Run dumpstate/logcat': '*#9900# → Run dumpstate/logcat',
+      'I started dumpstate': 'J’ai lancé le dumpstate',
+      'Copy to sdcard': 'Copier vers la carte SD / stockage',
+      'When dumpstate finishes, choose Copy to sdcard (or Copy to storage). Samsung writes files under Internal storage → log (/log).':
+          'Quand le dumpstate est terminé, choisissez Copy to sdcard (ou Copy to storage). Samsung écrit les fichiers dans Stockage interne → log (/log).',
+      'Copy to sdcard → Internal storage / log':
+          'Copy to sdcard → Stockage interne / log',
+      'Copy to sdcard finished': 'Copie vers le stockage terminée',
+      'Select dumpstate from /log': 'Choisir le dumpstate dans /log',
+      'Select the dumpstate file': 'Sélectionner le fichier dumpstate',
+      'Open Files (or My Files) → Internal storage → log. Pick the newest dumpstate / log file (often dumpstate_*.log or similar), then continue.':
+          'Ouvrez Fichiers (ou Mes fichiers) → Stockage interne → log. Choisissez le dumpstate / journal le plus récent (souvent dumpstate_*.log), puis continuez.',
+      'Files → Internal storage → log': 'Fichiers → Stockage interne → log',
+      'Dumpstate received': 'Dumpstate reçu',
+      'Choose a different dumpstate': 'Choisir un autre dumpstate',
+      'Next we ask for your consent, then encrypt and upload this dumpstate like a normal Android bugreport.':
+          'Ensuite nous demandons votre accord, puis chiffrons et envoyons ce dumpstate comme un rapport Android classique.',
       'Developer options → Take bug report → Full': 'Options développeur → Créer un rapport → Complet',
       'I already enabled Developer options': 'J’ai déjà activé les options développeur',
       'Open the screen below, find Build number, and tap it seven times until you see the confirmation.': 'Ouvrez l’écran ci-dessous, trouvez le numéro de build et touchez-le sept fois jusqu’à la confirmation.',
@@ -120,9 +311,23 @@ class AppLocalizations {
       'A notification will change to “Bug report captured”.': 'Une notification indiquera « Rapport de bugs capturé ».',
       'Timer started.': 'Le chronomètre a démarré.',
       'Tap the notification, accept the privacy warning, and pick CollecteMoi in the share sheet. You do not need to find the file yourself.': 'Touchez la notification, acceptez l’avertissement de confidentialité et choisissez CollecteMoi dans le menu de partage. Inutile de chercher le fichier vous-même.',
+      'Tap the notification, accept the privacy warning, and pick CollecteMoi in the share sheet.': 'Touchez la notification, acceptez l’avertissement de confidentialité et choisissez CollecteMoi dans le menu de partage.',
+      'Already have a bugreport ZIP from earlier? Use “Select a previous bugreport” below — Files / Downloads often keep bugreport-*.zip.': 'Vous avez déjà un ZIP de rapport ? Utilisez « Sélectionner un rapport précédent » ci-dessous — Fichiers / Téléchargements conserve souvent bugreport-*.zip.',
+      'Share sheet → CollecteMoi, or pick a saved ZIP': 'Partage → CollecteMoi, ou choisissez un ZIP enregistré',
+      'Select a previous bugreport': 'Sélectionner un rapport précédent',
+      'Choose a different bugreport': 'Choisir un autre rapport',
+      'Could not open file: {error}': 'Impossible d’ouvrir le fichier : {error}',
+      'Last submission': 'Dernier envoi',
+      'Last artefact': 'Dernier fichier',
+      'Submissions': 'Envois',
+      'App version': 'Version de l’app',
+      'None yet': 'Aucun pour le moment',
+      'Loading…': 'Chargement…',
       'Waiting for the shared file…': 'En attente du fichier partagé…',
       'Leave this screen open. When Android shares the ZIP, we will pick it up automatically.': 'Laissez cet écran ouvert. Nous récupérerons automatiquement l’archive ZIP partagée par Android.',
+      'Leave this screen open for a new share, or select a previous bugreport ZIP / dumpstate from Downloads or Files.': 'Laissez cet écran ouvert pour un nouveau partage, ou sélectionnez un ZIP / dumpstate précédent dans Téléchargements ou Fichiers.',
       'File ready at:\n{path}\n\nNext we will show what is inside and ask for your consent before uploading.': 'Fichier prêt :\n{path}\n\nNous allons afficher son contenu et demander votre accord avant l’envoi.',
+      'File ready:\n{path}\n\nNext we will show what is inside and ask for your consent before uploading.': 'Fichier prêt :\n{path}\n\nNous allons afficher son contenu et demander votre accord avant l’envoi.',
       'Optional: you can turn Developer options off again after sending. Continue to the consent screen to encrypt and upload.': 'Vous pourrez désactiver les options développeur après l’envoi. Continuez vers le consentement pour chiffrer et envoyer.',
       'Trigger sysdiagnose': 'Lancer le sysdiagnose',
       'Press and hold both volume buttons and the side button together for about 1 to 1.5 seconds, then release on the short vibration. A screenshot flash means the hold was too short or too long. Older Home-button models use a different combo.': 'Maintenez les deux boutons de volume et le bouton latéral pendant environ 1 à 1,5 seconde, puis relâchez à la courte vibration. Un flash de capture d’écran indique une durée incorrecte. Les anciens modèles avec bouton principal utilisent une autre combinaison.',
@@ -135,13 +340,104 @@ class AppLocalizations {
       'Ready:\n{path}': 'Prêt :\n{path}',
     },
     'es': {
-      'Choose light or dark theme': 'Elegir tema claro u oscuro', 'Dark': 'Oscuro', 'Light': 'Claro',
+      'Choose light or dark theme': 'Elegir tema claro u oscuro',
+      'Choose light, dark, or system theme': 'Elegir tema claro, oscuro o del sistema',
+      'Dark': 'Oscuro', 'Light': 'Claro', 'System': 'Sistema',
+      'Follows this phone’s light or dark setting by default.': 'Por defecto sigue el modo claro u oscuro del teléfono.',
+      'This device': 'Este dispositivo',
+      'App version {version}': 'Versión de la aplicación {version}',
+      'About': 'Acerca de',
+      'Settings': 'Ajustes',
+      'Appearance': 'Apariencia',
+      'Server': 'Servidor',
+      'Server online': 'Servidor en línea',
+      'Server offline': 'Servidor sin conexión',
+      'Checking server…': 'Comprobando el servidor…',
+      'Server status unknown': 'Estado del servidor desconocido',
+      'Server status': 'Estado del servidor',
+      'Last check: {when}': 'Última comprobación: {when}',
+      'Not checked yet': 'Aún no comprobado',
+      'Endpoint': 'Endpoint',
+      'Error details': 'Detalles del error',
+      'The lab API answered /healthz successfully.':
+          'La API del laboratorio respondió correctamente a /healthz.',
+      'Check again': 'Comprobar de nuevo',
+      'Copy error': 'Copiar error',
+      'Error copied': 'Error copiado',
+      'Close': 'Cerrar',
+      '{artefact} uploaded successfully': '{artefact} enviado correctamente',
+      '{artefact} upload failed': 'Error al enviar {artefact}',
+      'Enrollment': 'Inscripción',
+      'Change the CollecteMoi API address used for enrollment. Builds generated with a server URL hide this field on the enroll screen.':
+          'Cambia la dirección de la API de CollecteMoi usada para la inscripción. Las builds generadas con una URL de servidor ocultan este campo en la pantalla de inscripción.',
+      'Enter a valid server URL (https://…)': 'Introduce una URL de servidor válida (https://…)',
+      'Server URL saved': 'URL del servidor guardada',
+      'Save server URL': 'Guardar URL del servidor',
+      'Lab': 'Laboratorio',
+      'Lab name': 'Nombre del laboratorio',
+      'The lab name comes from your company branding on the server and cannot be changed in the app.':
+          'El nombre del laboratorio proviene de la marca de tu empresa en el servidor y no se puede cambiar en la aplicación.',
+      'Not set': 'No definido',
+      '{count} screenshot(s) could not be loaded into memory':
+          'No se pudieron cargar {count} captura(s) en memoria',
+      'Company': 'Empresa',
+      'Device ID': 'ID del dispositivo',
+      'Platform': 'Plataforma',
+      'Manufacturer': 'Fabricante',
+      'Brand': 'Marca',
+      'Model': 'Modelo',
+      'Device name': 'Nombre del dispositivo',
+      'OS version': 'Versión del sistema',
+      'Captured at enrollment on this phone.': 'Capturado en la inscripción en este teléfono.',
+      'Device details were not stored for this enrollment. Re-enroll to capture them.': 'No se guardaron los detalles del dispositivo en esta inscripción. Vuelve a inscribirte para capturarlos.',
+      'Android SDK': 'SDK de Android',
+      'API level': 'Nivel de API',
+      'Security patch': 'Parche de seguridad',
+      'OS / system': 'SO / sistema',
+      'Android release': 'Versión de Android',
+      'Build incremental': 'Build incremental',
+      'Build ID': 'ID de build',
+      'Build display': 'Build mostrado',
+      'Build type': 'Tipo de build',
+      'Build tags': 'Etiquetas de build',
+      'Build host': 'Host de build',
+      'Base OS': 'SO base',
+      'Codename': 'Nombre en clave',
+      'Board': 'Placa',
+      'Bootloader': 'Bootloader',
+      'ABIs': 'ABI',
+      'iOS version': 'Versión de iOS',
+      'Model name': 'Nombre del modelo',
+      'Machine': 'Máquina',
+      'Darwin release': 'Versión Darwin',
+      'Darwin version': 'Build Darwin',
+      'Physical device': 'Dispositivo físico',
+      'Product': 'Producto',
+      'Hardware': 'Hardware',
+      'OS name': 'Nombre del sistema',
+      'Model id': 'ID de modelo',
+      'Localized model': 'Modelo localizado',
+      'Vendor ID': 'ID de proveedor',
+      'Browser vendor': 'Proveedor del navegador',
+      'Language': 'Idioma',
+      'Show lab key': 'Mostrar clave del laboratorio',
+      'For lab testing only. Keep this off for normal enrollment with a work email.': 'Solo para pruebas de laboratorio. Déjalo desactivado para inscribirte con un correo de trabajo.',
+      'Trust self-signed certificate': 'Confiar en el certificado autofirmado',
+      'Allow HTTPS to a lab server that uses a self-signed TLS certificate. Turn this off for production servers with a trusted certificate.': 'Permite HTTPS hacia un servidor de laboratorio con certificado TLS autofirmado. Desactívalo en servidores de producción con un certificado de confianza.',
+      'Needed for lab servers with a self-signed HTTPS certificate.': 'Necesario para servidores de laboratorio con un certificado HTTPS autofirmado.',
+      'Enter a work email': 'Introduce un correo de trabajo',
+      'Enter your work email to receive a one-time verification code.': 'Introduce tu correo de trabajo para recibir un código de verificación de un solo uso.',
       'Submission history and My data': 'Historial de envíos y Mis datos', 'Lab client': 'Cliente de laboratorio',
       'Enrolled against {url}. Use Lab file upload to push a test artefact through the same chunked protocol.': 'Inscrito en {url}. Usa la carga de archivos del laboratorio para enviar una prueba con el mismo protocolo.',
       'Submission history': 'Historial de envíos', 'View uploads received by the lab and their status': 'Consulta los archivos recibidos por el laboratorio y su estado',
       'Open requests': 'Solicitudes abiertas', 'Lab file upload': 'Carga de archivo del laboratorio',
       'Pick any file and submit via the upload API': 'Elige un archivo y envíalo mediante la API', ' (guide preview)': ' (vista previa)',
       '{count} / {total} uploads finished': '{count} / {total} cargas finalizadas',
+      '{failed} failed — see list below': '{failed} fallidos — ver la lista abajo',
+      '{failed} failed — open My data': '{failed} fallidos — abrir Mis datos',
+      'Failed ({count})': 'Fallidos ({count})',
+      'Other uploads': 'Otros envíos',
+      'Open': 'Abrir',
       'Some uploads need consent or a retry': 'Algunas cargas necesitan tu consentimiento o un nuevo intento', 'My data': 'Mis datos',
       'No artefact types on this request': 'Esta solicitud no incluye tipos de archivo',
       '{kind} is not available on this device. Use Lab file upload if you are on web/desktop.': '{kind} no está disponible en este dispositivo. Usa la carga del laboratorio desde web o escritorio.',
@@ -154,7 +450,16 @@ class AppLocalizations {
       'unknown size': 'tamaño desconocido', 'Local file · {size}': 'Archivo local · {size}',
       'The captured file is no longer on this phone. Go back and share or import it again.': 'El archivo capturado ya no está en este teléfono. Vuelve para compartirlo o importarlo de nuevo.',
       'Ready to encrypt — file kept on this phone until upload finishes.': 'Listo para cifrar; el archivo permanece en este teléfono hasta que termine la carga.',
-      'Back to home': 'Volver al inicio', 'Upload failed': 'Error al cargar', 'Lab file client': 'Cliente de archivos del laboratorio',
+      'Back to home': 'Volver al inicio', 'Upload failed': 'Error al cargar',
+      'Upload complete': 'Carga completada',
+      'Encrypting…': 'Cifrando…',
+      'Uploading…': 'Cargando…',
+      'Uploading… {pct}%': 'Cargando… {pct} %',
+      '{artefact} was sent to the lab.': '{artefact} se envió al laboratorio.',
+      '{artefact} could not be sent.': 'No se pudo enviar {artefact}.',
+      'CollecteMoi is sending a file in the background.':
+          'CollecteMoi está enviando un archivo en segundo plano.',
+      'Lab file client': 'Cliente de archivos del laboratorio',
       'Web lab client': 'Cliente web del laboratorio',
       'Enroll with token demo, then pick a file (bugreport ZIP, sysdiagnose archive, or any test blob) and send it through the same consent + chunked upload path as the phone app.': 'Inscríbete con el token demo, elige un archivo (ZIP de informe, archivo sysdiagnose o prueba) y envíalo con el mismo flujo de consentimiento y carga que en el móvil.',
       'Artefact kind': 'Tipo de archivo', 'Choose file': 'Elegir archivo', 'Choose another file': 'Elegir otro archivo',
@@ -169,14 +474,67 @@ class AppLocalizations {
       'Payload missing — capture the file again.': 'Falta el archivo; vuelve a capturarlo.',
       'Processing failed': 'Error de procesamiento', 'Processing': 'Procesando', 'Submitted': 'Enviado',
       'Discard this artefact?': '¿Descartar este archivo?', 'Removes the local copy and job record from this phone.': 'Elimina la copia local y la tarea de este teléfono.',
-      'Discard': 'Descartar', 'Retry upload': 'Reintentar carga', 'Waiting for consent': 'Esperando consentimiento',
+      'Discard': 'Descartar', 'Retry upload': 'Reintentar carga',
+      'Resend': 'Reenviar',
+      'Resend all': 'Reenviar todo',
+      'Resending in the background…': 'Reenviando en segundo plano…',
+      'Delete': 'Eliminar',
+      'Delete all failed': 'Eliminar todos los fallidos',
+      'Delete all failed items?': '¿Eliminar todos los elementos fallidos?',
+      'Delete this failed item?': '¿Eliminar este elemento fallido?',
+      'Removes this message or file from this phone. The lab is not changed.':
+          'Elimina este mensaje o archivo de este teléfono. El laboratorio no cambia.',
+      'Removes failed messages and files from this phone only. Nothing already received by the lab is erased.':
+          'Elimina mensajes y archivos fallidos solo de este teléfono. No se borra nada ya recibido por el laboratorio.',
+      'Deleted {count} failed item(s)': '{count} elemento(s) fallido(s) eliminado(s)',
+      'Failed item deleted': 'Elemento fallido eliminado',
+      'Item discarded': 'Elemento descartado',
+      'Some items did not reach the lab. You can resend them without capturing again.':
+          'Algunos elementos no llegaron al laboratorio. Puedes reenviarlos sin capturarlos de nuevo.',
+      'Some items did not reach the lab. You can resend them without capturing again, or delete them from this phone.':
+          'Algunos elementos no llegaron al laboratorio. Puedes reenviarlos sin capturarlos de nuevo, o eliminarlos de este teléfono.',
+      'Some items failed — open My data to Resend':
+          'Algunos envíos fallaron — abre Mis datos para reenviar',
+      'This phone was blocked by the lab. Contact your administrator, then tap Resend.':
+          'Este teléfono fue bloqueado por el laboratorio. Contacta a tu administrador y luego toca Reenviar.',
+      'Network problem — tap Resend to try again.':
+          'Problema de red — toca Reenviar para intentarlo de nuevo.',
+      'Network or server problem — tap Resend to try again.':
+          'Problema de red o del servidor — toca Reenviar para intentarlo de nuevo.',
+      'Too many requests — wait a moment, then tap Resend.':
+          'Demasiadas solicitudes — espera un momento y toca Reenviar.',
+      'Upload limit reached (too many reports from this phone). Wait and try again later.':
+          'Límite de envíos alcanzado (demasiados informes desde este teléfono). Inténtalo más tarde.',
+      'Upload failed — tap Resend to try again.':
+          'Error al enviar — toca Reenviar para intentarlo de nuevo.',
+      'Waiting for consent': 'Esperando consentimiento',
       'Queued': 'En cola', 'Encrypting': 'Cifrando', 'Uploading': 'Cargando', 'Sent': 'Enviado', 'Failed': 'Error',
       'Add message text or a screenshot.': 'Añade el texto del mensaje o una captura.', 'Channel': 'Canal',
       'Sender (number, handle, address)': 'Remitente (número, usuario, dirección)', 'Message text': 'Texto del mensaje',
       'Email': 'Correo electrónico', 'Social media message': 'Mensaje en redes sociales', 'Other': 'Otro',
       'Detected links (not opened):': 'Enlaces detectados (no abiertos):', 'Why it looks suspicious': 'Por qué parece sospechoso',
       'I clicked a link': 'Hice clic en un enlace', 'I replied': 'Respondí', 'Add screenshots': 'Añadir capturas',
-      '{count} screenshot(s) attached': '{count} captura(s) adjunta(s)', 'Step {step} of {total}': 'Paso {step} de {total}',
+      '{count} screenshot(s) attached': '{count} captura(s) adjunta(s)',
+      'Message preview': 'Vista previa del mensaje',
+      'From': 'De',
+      'Message': 'Mensaje',
+      'No message text': 'Sin texto del mensaje',
+      'Screenshots': 'Capturas',
+      '{count} screenshot(s)': '{count} captura(s)',
+      'Clicked a link': 'Enlace pulsado',
+      'Replied': 'Respondió',
+      'How this will look when reported': 'Así se verá al informar',
+      'Hide preview': 'Ocultar vista previa',
+      'Show preview': 'Mostrar vista previa',
+      'Upload started in the background. You can leave this screen — progress is on My data.':
+          'Carga iniciada en segundo plano. Puedes salir de esta pantalla: el progreso está en Mis datos.',
+      'Upload already in progress…': 'Ya hay una carga en curso…',
+      'After you confirm, encryption and upload continue in the background. You can use other apps — Android shows a notification until it finishes.':
+          'Tras confirmar, el cifrado y la carga siguen en segundo plano. Puedes usar otras apps: Android muestra una notificación hasta terminar.',
+      'Encrypting in the background…': 'Cifrando en segundo plano…',
+      'Uploading in the background…': 'Subiendo en segundo plano…',
+      'You can leave the app — tap for details': 'Puedes salir de la app — toca para ver detalles',
+      'Step {step} of {total}': 'Paso {step} de {total}',
       'Check this phone': 'Comprobar este teléfono', 'Open device info': 'Abrir información del dispositivo',
       'Open developer settings': 'Abrir ajustes de desarrollador', 'I started the bug report': 'Inicié el informe de errores',
       'I got the notification': 'Recibí la notificación', 'Review and send': 'Revisar y enviar', 'Continue': 'Continuar',
@@ -212,6 +570,43 @@ class AppLocalizations {
       'This does not look like a bugreport:\n{details}': 'Este archivo no parece un informe de errores:\n{details}',
       'This does not look like a sysdiagnose:\n{details}': 'Este archivo no parece un sysdiagnose:\n{details}',
       'Settings → About phone → Build number × 7': 'Ajustes → Acerca del teléfono → Número de compilación × 7',
+      'Samsung — dial *#9900# → dumpstate → Copy to sdcard → /log':
+          'Samsung — marca *#9900# → dumpstate → Copy to sdcard → /log',
+      'Samsung dumpstate guide (no Developer options)':
+          'Guía dumpstate Samsung (sin Opciones de desarrollador)',
+      'On Samsung phones without Developer options, use the Samsung dumpstate guide instead.':
+          'En móviles Samsung sin Opciones de desarrollador, usa la guía dumpstate Samsung.',
+      'Use Developer options instead': 'Usar Opciones de desarrollador en su lugar',
+      'Start Samsung guide': 'Empezar guía Samsung',
+      'Samsung dumpstate (no Developer options)':
+          'Dumpstate Samsung (sin Opciones de desarrollador)',
+      'This path uses Samsung’s dialer code to write a dumpstate to storage. You do not need Developer options or “Take bug report”.':
+          'Este recorrido usa el código del marcador Samsung para guardar un dumpstate. No necesitas Opciones de desarrollador ni «Crear informe».',
+      'Open the Phone dialer': 'Abrir el marcador',
+      'Open the Phone / Dialer app (not this app). Type *#9900# and open the SysDump / dumpstate menu that appears. Menus differ slightly by One UI version.':
+          'Abre Teléfono / Marcador (no esta app). Escribe *#9900# y abre el menú SysDump / dumpstate. Los textos varían según One UI.',
+      'Phone → dial *#9900#': 'Teléfono → marcar *#9900#',
+      'I dialed *#9900#': 'Ya marqué *#9900#',
+      'Run dumpstate': 'Ejecutar dumpstate',
+      'In the menu, choose Run dumpstate/logcat (wording may be SysDump, Dumpstate, or similar). Wait while Samsung collects logs — keep the screen on.':
+          'En el menú, elige Run dumpstate/logcat (a veces SysDump, Dumpstate…). Espera la recolección — deja la pantalla encendida.',
+      '*#9900# → Run dumpstate/logcat': '*#9900# → Run dumpstate/logcat',
+      'I started dumpstate': 'Ya lancé el dumpstate',
+      'Copy to sdcard': 'Copiar a sdcard / almacenamiento',
+      'When dumpstate finishes, choose Copy to sdcard (or Copy to storage). Samsung writes files under Internal storage → log (/log).':
+          'Cuando termine, elige Copy to sdcard (o Copy to storage). Samsung escribe en Almacenamiento interno → log (/log).',
+      'Copy to sdcard → Internal storage / log':
+          'Copy to sdcard → Almacenamiento interno / log',
+      'Copy to sdcard finished': 'Copia al almacenamiento terminada',
+      'Select dumpstate from /log': 'Elegir dumpstate en /log',
+      'Select the dumpstate file': 'Seleccionar el archivo dumpstate',
+      'Open Files (or My Files) → Internal storage → log. Pick the newest dumpstate / log file (often dumpstate_*.log or similar), then continue.':
+          'Abre Archivos (o Mis archivos) → Almacenamiento interno → log. Elige el dumpstate / registro más reciente (a menudo dumpstate_*.log) y continúa.',
+      'Files → Internal storage → log': 'Archivos → Almacenamiento interno → log',
+      'Dumpstate received': 'Dumpstate recibido',
+      'Choose a different dumpstate': 'Elegir otro dumpstate',
+      'Next we ask for your consent, then encrypt and upload this dumpstate like a normal Android bugreport.':
+          'Luego pedimos tu consentimiento y cifraremos/subiremos este dumpstate como un informe Android normal.',
       'Developer options → Take bug report → Full': 'Opciones de desarrollador → Crear informe → Completo',
       'I already enabled Developer options': 'Ya activé las Opciones de desarrollador',
       'Open the screen below, find Build number, and tap it seven times until you see the confirmation.': 'Abre la pantalla siguiente, busca Número de compilación y tócalo siete veces hasta ver la confirmación.',
@@ -223,9 +618,23 @@ class AppLocalizations {
       'A notification will change to “Bug report captured”.': 'La notificación cambiará a «Informe de errores capturado».',
       'Timer started.': 'Temporizador iniciado.',
       'Tap the notification, accept the privacy warning, and pick CollecteMoi in the share sheet. You do not need to find the file yourself.': 'Toca la notificación, acepta el aviso de privacidad y elige CollecteMoi en el menú para compartir. No hace falta buscar el archivo.',
+      'Tap the notification, accept the privacy warning, and pick CollecteMoi in the share sheet.': 'Toca la notificación, acepta el aviso de privacidad y elige CollecteMoi en el menú para compartir.',
+      'Already have a bugreport ZIP from earlier? Use “Select a previous bugreport” below — Files / Downloads often keep bugreport-*.zip.': '¿Ya tienes un ZIP de informe? Usa «Seleccionar un informe anterior» abajo — Archivos / Descargas suele guardar bugreport-*.zip.',
+      'Share sheet → CollecteMoi, or pick a saved ZIP': 'Compartir → CollecteMoi, o elige un ZIP guardado',
+      'Select a previous bugreport': 'Seleccionar un informe anterior',
+      'Choose a different bugreport': 'Elegir otro informe',
+      'Could not open file: {error}': 'No se pudo abrir el archivo: {error}',
+      'Last submission': 'Último envío',
+      'Last artefact': 'Último archivo',
+      'Submissions': 'Envíos',
+      'App version': 'Versión de la app',
+      'None yet': 'Ninguno aún',
+      'Loading…': 'Cargando…',
       'Waiting for the shared file…': 'Esperando el archivo compartido…',
       'Leave this screen open. When Android shares the ZIP, we will pick it up automatically.': 'Deja esta pantalla abierta. Recibiremos automáticamente el ZIP que comparta Android.',
+      'Leave this screen open for a new share, or select a previous bugreport ZIP / dumpstate from Downloads or Files.': 'Deja esta pantalla abierta para un nuevo compartido, o selecciona un ZIP / dumpstate anterior en Descargas o Archivos.',
       'File ready at:\n{path}\n\nNext we will show what is inside and ask for your consent before uploading.': 'Archivo listo:\n{path}\n\nMostraremos su contenido y pediremos tu consentimiento antes de cargarlo.',
+      'File ready:\n{path}\n\nNext we will show what is inside and ask for your consent before uploading.': 'Archivo listo:\n{path}\n\nMostraremos su contenido y pediremos tu consentimiento antes de cargarlo.',
       'Optional: you can turn Developer options off again after sending. Continue to the consent screen to encrypt and upload.': 'Después del envío, puedes desactivar las Opciones de desarrollador. Continúa para dar tu consentimiento, cifrar y cargar.',
       'Trigger sysdiagnose': 'Iniciar sysdiagnose',
       'Press and hold both volume buttons and the side button together for about 1 to 1.5 seconds, then release on the short vibration. A screenshot flash means the hold was too short or too long. Older Home-button models use a different combo.': 'Mantén pulsados ambos botones de volumen y el botón lateral durante 1–1,5 segundos y suéltalos al notar la vibración breve. Un destello de captura indica que duró demasiado o muy poco. Los modelos antiguos con botón de inicio usan otra combinación.',
@@ -249,9 +658,46 @@ class AppLocalizations {
   static String translate(String source, Locale locale) {
     return _translations[locale.languageCode]?[source] ?? source;
   }
+
+  /// Same language resolution as [MaterialApp.localeResolutionCallback]
+  /// (device language when supported, else English). For services without
+  /// a [BuildContext] (e.g. system notifications).
+  static Locale resolveDeviceLocale({String? fallbackLanguageCode}) {
+    Locale? findLanguage(String? languageCode) {
+      if (languageCode == null || languageCode.isEmpty) return null;
+      final want = languageCode.toLowerCase();
+      for (final locale in appSupportedLocales) {
+        if (locale.languageCode == want) return locale;
+      }
+      return null;
+    }
+
+    return findLanguage(PlatformDispatcher.instance.locale.languageCode) ??
+        findLanguage(fallbackLanguageCode) ??
+        const Locale('en');
+  }
+
+  static String trDevice(String source, {String? fallbackLanguageCode}) =>
+      translate(source, resolveDeviceLocale(fallbackLanguageCode: fallbackLanguageCode));
 }
 
 extension AppLocalization on BuildContext {
   String tr(String source) =>
       AppLocalizations.translate(source, Localizations.localeOf(this));
+
+  /// Branded tenant copy for the active locale (override → dictionary → English).
+  String branded(String Function(TenantCopy copy) pick) {
+    final tenant = read<TenantConfig>();
+    return tenant.branded(Localizations.localeOf(this), pick);
+  }
+
+  String brandedTagline() {
+    final tenant = read<TenantConfig>();
+    return tenant.brandedTagline(Localizations.localeOf(this));
+  }
+
+  String brandedEnrollLead() {
+    final tenant = read<TenantConfig>();
+    return tenant.brandedEnrollLead(Localizations.localeOf(this));
+  }
 }

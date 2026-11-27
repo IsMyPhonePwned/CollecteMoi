@@ -7,6 +7,7 @@ members = [
     "crates/collectemoi-api",
     "crates/collectemoi-cli",
     "crates/collectemoi-worker",
+    "crates/collectemoi-tui",
 ]
 
 [workspace.package]
@@ -29,7 +30,7 @@ base64 = "0.22"
 bytes = "1"
 chacha20poly1305 = "0.10"
 ciborium = "0.2"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 hex = "0.4"
 hpke = { version = "0.12", default-features = false, features = ["std", "x25519"] }
 p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }

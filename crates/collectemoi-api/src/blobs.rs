@@ -310,9 +310,25 @@ pub async fn get_blob(
     Ok(Json(enrich_blob(&state, meta, hist)))
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct BlobContentQuery {
+    /// When set, serve for in-console preview (inline disposition). Access log
+    /// classifies these as `blob_preview` instead of `blob_download`.
+    #[serde(default)]
+    pub preview: Option<String>,
+}
+
+fn preview_flag(raw: Option<&str>) -> bool {
+    match raw.map(str::trim).filter(|s| !s.is_empty()) {
+        None => false,
+        Some(v) => v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"),
+    }
+}
+
 pub async fn get_blob_content(
     State(state): State<AppState>,
     AxumPath(id): AxumPath<String>,
+    Query(q): Query<BlobContentQuery>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     let id = parse_uuid_id(&id).map_err(|_| {
         (
@@ -349,18 +365,38 @@ pub async fn get_blob_content(
         meta.filename.clone()
     };
     let filename = safe_filename(&raw_name);
+    let preview = preview_flag(q.preview.as_deref());
+    let content_type = if meta.artefact == "message_report"
+        || filename.ends_with(".json")
+        || meta.content_type.contains("json")
+    {
+        "application/json; charset=utf-8"
+    } else if !meta.content_type.is_empty() {
+        meta.content_type.as_str()
+    } else {
+        "application/octet-stream"
+    };
     let mut headers = HeaderMap::new();
     headers.insert(
         header::CONTENT_TYPE,
-        meta.content_type
+        content_type
             .parse()
             .unwrap_or(header::HeaderValue::from_static("application/octet-stream")),
     );
+    let disposition = if preview {
+        format!("inline; filename=\"{filename}\"")
+    } else {
+        format!("attachment; filename=\"{filename}\"")
+    };
     headers.insert(
         header::CONTENT_DISPOSITION,
-        format!("attachment; filename=\"{filename}\"")
+        disposition
             .parse()
-            .unwrap_or(header::HeaderValue::from_static("attachment")),
+            .unwrap_or(header::HeaderValue::from_static(if preview {
+                "inline"
+            } else {
+                "attachment"
+            })),
     );
     if meta.size > 0 {
         headers.insert(header::CONTENT_LENGTH, meta.size.into());

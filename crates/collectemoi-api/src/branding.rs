@@ -50,6 +50,9 @@ pub struct BrandingTenant {
     pub privacy_policy_url: String,
     #[serde(default = "default_locale")]
     pub default_locale: String,
+    /// Locales shipped in the generated client (subset of en/fr/es).
+    #[serde(default = "default_enabled_locales")]
+    pub enabled_locales: Vec<String>,
     #[serde(default = "default_mode")]
     pub mode: String,
     #[serde(default = "default_collectors")]
@@ -58,9 +61,36 @@ pub struct BrandingTenant {
     pub tls_pins_spki_sha256: Vec<String>,
     #[serde(default)]
     pub case_encryption_public_key_hex: String,
-    /// Per-screen user-facing copy (home, consent, collectors, …).
+    /// Subject line for the enroll OTP email/SMS notification (webhook payload).
+    /// Placeholders: `{code}`, `{company_name}`, `{display_name}`, `{email}`,
+    /// `{expires_in_mins}`, `{expires_in_secs}`.
+    #[serde(default = "default_otp_notification_subject")]
+    pub otp_notification_subject: String,
+    /// Body for the enroll OTP notification delivered via webhook.
+    #[serde(default = "default_otp_notification_body")]
+    pub otp_notification_body: String,
+    /// Per-screen user-facing copy (home, consent, collectors, …). Base language = English.
     #[serde(default)]
     pub copy: BrandingCopy,
+    /// Optional per-locale overrides for [`copy`] (keys: `fr`, `es`, …).
+    /// Empty / missing fields fall back to dictionary lookup of the English base, then English.
+    #[serde(default)]
+    pub copy_i18n: std::collections::BTreeMap<String, serde_json::Value>,
+    /// Optional per-locale overrides for tagline / enroll / OTP notification text.
+    #[serde(default)]
+    pub strings_i18n: std::collections::BTreeMap<String, TenantStringsI18n>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TenantStringsI18n {
+    #[serde(default)]
+    pub tagline: String,
+    #[serde(default)]
+    pub enroll_lead: String,
+    #[serde(default)]
+    pub otp_notification_subject: String,
+    #[serde(default)]
+    pub otp_notification_body: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,11 +107,49 @@ pub struct BrandingCopy {
     pub ios_sysdiagnose: GuideCopy,
     #[serde(default)]
     pub message_report: MessageCopy,
+    /// System notification strings shown while encrypting / uploading artefacts.
+    #[serde(default)]
+    pub notifications: NotificationsCopy,
 }
 
 impl Default for BrandingCopy {
     fn default() -> Self {
         default_branding_copy()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationsCopy {
+    #[serde(default = "default_notif_encrypting_title")]
+    pub encrypting_title: String,
+    #[serde(default = "default_notif_uploading_title")]
+    pub uploading_title: String,
+    /// Progress title; `{pct}` is replaced with 0–100.
+    #[serde(default = "default_notif_uploading_progress_title")]
+    pub uploading_progress_title: String,
+    #[serde(default = "default_notif_complete_title")]
+    pub complete_title: String,
+    #[serde(default = "default_notif_failed_title")]
+    pub failed_title: String,
+    /// Body after success; `{artefact}` is the collector label.
+    #[serde(default = "default_notif_complete_body")]
+    pub complete_body: String,
+    /// Body after failure; `{artefact}` is the collector label.
+    #[serde(default = "default_notif_failed_body")]
+    pub failed_body: String,
+}
+
+impl Default for NotificationsCopy {
+    fn default() -> Self {
+        Self {
+            encrypting_title: default_notif_encrypting_title(),
+            uploading_title: default_notif_uploading_title(),
+            uploading_progress_title: default_notif_uploading_progress_title(),
+            complete_title: default_notif_complete_title(),
+            failed_title: default_notif_failed_title(),
+            complete_body: default_notif_complete_body(),
+            failed_body: default_notif_failed_body(),
+        }
     }
 }
 
@@ -301,6 +369,33 @@ fn default_message_lead() -> String {
 fn default_message_button() -> String {
     "Continue to consent".into()
 }
+fn default_otp_notification_subject() -> String {
+    "{display_name}: your verification code".into()
+}
+fn default_otp_notification_body() -> String {
+    "Your verification code for {company_name} is {code}.\n\nIt expires in {expires_in_mins} minutes.\n\nIf you did not request this, you can ignore this message.".into()
+}
+fn default_notif_encrypting_title() -> String {
+    "Encrypting…".into()
+}
+fn default_notif_uploading_title() -> String {
+    "Uploading…".into()
+}
+fn default_notif_uploading_progress_title() -> String {
+    "Uploading… {pct}%".into()
+}
+fn default_notif_complete_title() -> String {
+    "Upload complete".into()
+}
+fn default_notif_failed_title() -> String {
+    "Upload failed".into()
+}
+fn default_notif_complete_body() -> String {
+    "{artefact} was sent to the lab.".into()
+}
+fn default_notif_failed_body() -> String {
+    "{artefact} could not be sent.".into()
+}
 
 fn default_branding_copy() -> BrandingCopy {
     BrandingCopy {
@@ -310,6 +405,7 @@ fn default_branding_copy() -> BrandingCopy {
         android_bugreport: GuideCopy::android_default(),
         ios_sysdiagnose: GuideCopy::ios_default(),
         message_report: MessageCopy::default(),
+        notifications: NotificationsCopy::default(),
     }
 }
 
@@ -383,6 +479,50 @@ fn sanitize_copy(mut c: BrandingCopy) -> BrandingCopy {
     c.message_report.lead = clip_copy(fill(c.message_report.lead, default_message_lead()), 400);
     c.message_report.button =
         clip_copy(fill(c.message_report.button, default_message_button()), 80);
+
+    c.notifications.encrypting_title = clip_copy(
+        fill(
+            c.notifications.encrypting_title,
+            default_notif_encrypting_title(),
+        ),
+        80,
+    );
+    c.notifications.uploading_title = clip_copy(
+        fill(
+            c.notifications.uploading_title,
+            default_notif_uploading_title(),
+        ),
+        80,
+    );
+    c.notifications.uploading_progress_title = clip_copy(
+        fill(
+            c.notifications.uploading_progress_title,
+            default_notif_uploading_progress_title(),
+        ),
+        80,
+    );
+    c.notifications.complete_title = clip_copy(
+        fill(
+            c.notifications.complete_title,
+            default_notif_complete_title(),
+        ),
+        80,
+    );
+    c.notifications.failed_title = clip_copy(
+        fill(c.notifications.failed_title, default_notif_failed_title()),
+        80,
+    );
+    c.notifications.complete_body = clip_copy(
+        fill(
+            c.notifications.complete_body,
+            default_notif_complete_body(),
+        ),
+        200,
+    );
+    c.notifications.failed_body = clip_copy(
+        fill(c.notifications.failed_body, default_notif_failed_body()),
+        200,
+    );
     c
 }
 
@@ -395,8 +535,228 @@ fn default_display_name() -> String {
 fn default_locale() -> String {
     "en".into()
 }
+fn default_enabled_locales() -> Vec<String> {
+    vec!["en".into(), "fr".into(), "es".into()]
+}
 fn default_mode() -> String {
     "generic".into()
+}
+
+fn sanitize_locale_code(raw: &str) -> Option<String> {
+    let t = raw.trim().to_ascii_lowercase();
+    match t.as_str() {
+        "en" | "fr" | "es" => Some(t),
+        _ => None,
+    }
+}
+
+fn sanitize_enabled_locales(list: Vec<String>, default_locale: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for raw in list {
+        if let Some(code) = sanitize_locale_code(&raw) {
+            if !out.iter().any(|c| c == &code) {
+                out.push(code);
+            }
+        }
+    }
+    if out.is_empty() {
+        return default_enabled_locales();
+    }
+    if !out.iter().any(|c| c == "en") {
+        out.insert(0, "en".into());
+    }
+    let def = sanitize_locale_code(default_locale).unwrap_or_else(|| "en".into());
+    if !out.iter().any(|c| c == &def) {
+        out.push(def);
+    }
+    out
+}
+
+fn json_get_str(v: &serde_json::Value, path: &[&str]) -> String {
+    let mut cur = v;
+    for p in path {
+        cur = match cur.get(*p) {
+            Some(next) => next,
+            None => return String::new(),
+        };
+    }
+    cur.as_str()
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
+}
+
+fn clip_opt(s: String, max: usize) -> String {
+    if s.is_empty() {
+        String::new()
+    } else {
+        clip_copy(s, max)
+    }
+}
+
+/// Build a BrandingCopy from a partial JSON object (missing → empty, not English defaults).
+fn branding_copy_from_partial(v: &serde_json::Value) -> BrandingCopy {
+    BrandingCopy {
+        home: HomeCopy {
+            headline: clip_opt(json_get_str(v, &["home", "headline"]), 120),
+            body: clip_opt(json_get_str(v, &["home", "body"]), 500),
+            android_title: clip_opt(json_get_str(v, &["home", "android_title"]), 80),
+            android_subtitle: clip_opt(json_get_str(v, &["home", "android_subtitle"]), 160),
+            ios_title: clip_opt(json_get_str(v, &["home", "ios_title"]), 80),
+            ios_subtitle: clip_opt(json_get_str(v, &["home", "ios_subtitle"]), 160),
+            message_title: clip_opt(json_get_str(v, &["home", "message_title"]), 80),
+            message_subtitle: clip_opt(json_get_str(v, &["home", "message_subtitle"]), 160),
+        },
+        consent: ConsentCopy {
+            title: clip_opt(json_get_str(v, &["consent", "title"]), 80),
+            footer: clip_opt(json_get_str(v, &["consent", "footer"]), 400),
+            checkbox: clip_opt(json_get_str(v, &["consent", "checkbox"]), 200),
+            button: clip_opt(json_get_str(v, &["consent", "button"]), 80),
+            disclosure_android: clip_opt(json_get_str(v, &["consent", "disclosure_android"]), 500),
+            disclosure_ios: clip_opt(json_get_str(v, &["consent", "disclosure_ios"]), 500),
+            disclosure_message: clip_opt(json_get_str(v, &["consent", "disclosure_message"]), 500),
+        },
+        my_data: MyDataCopy {
+            title: clip_opt(json_get_str(v, &["my_data", "title"]), 80),
+            device_heading: clip_opt(json_get_str(v, &["my_data", "device_heading"]), 80),
+            artefacts_heading: clip_opt(json_get_str(v, &["my_data", "artefacts_heading"]), 120),
+            empty: clip_opt(json_get_str(v, &["my_data", "empty"]), 160),
+            clear_button: clip_opt(json_get_str(v, &["my_data", "clear_button"]), 80),
+        },
+        android_bugreport: GuideCopy {
+            title: clip_opt(json_get_str(v, &["android_bugreport", "title"]), 80),
+            headline: clip_opt(json_get_str(v, &["android_bugreport", "headline"]), 120),
+            body: clip_opt(json_get_str(v, &["android_bugreport", "body"]), 500),
+        },
+        ios_sysdiagnose: GuideCopy {
+            title: clip_opt(json_get_str(v, &["ios_sysdiagnose", "title"]), 80),
+            headline: clip_opt(json_get_str(v, &["ios_sysdiagnose", "headline"]), 120),
+            body: clip_opt(json_get_str(v, &["ios_sysdiagnose", "body"]), 500),
+        },
+        message_report: MessageCopy {
+            title: clip_opt(json_get_str(v, &["message_report", "title"]), 80),
+            lead: clip_opt(json_get_str(v, &["message_report", "lead"]), 400),
+            button: clip_opt(json_get_str(v, &["message_report", "button"]), 80),
+        },
+        notifications: NotificationsCopy {
+            encrypting_title: clip_opt(
+                json_get_str(v, &["notifications", "encrypting_title"]),
+                80,
+            ),
+            uploading_title: clip_opt(
+                json_get_str(v, &["notifications", "uploading_title"]),
+                80,
+            ),
+            uploading_progress_title: clip_opt(
+                json_get_str(v, &["notifications", "uploading_progress_title"]),
+                80,
+            ),
+            complete_title: clip_opt(
+                json_get_str(v, &["notifications", "complete_title"]),
+                80,
+            ),
+            failed_title: clip_opt(json_get_str(v, &["notifications", "failed_title"]), 80),
+            complete_body: clip_opt(
+                json_get_str(v, &["notifications", "complete_body"]),
+                200,
+            ),
+            failed_body: clip_opt(json_get_str(v, &["notifications", "failed_body"]), 200),
+        },
+    }
+}
+
+fn branding_copy_to_partial_json(c: &BrandingCopy) -> serde_json::Value {
+    json!({
+        "home": {
+            "headline": c.home.headline,
+            "body": c.home.body,
+            "android_title": c.home.android_title,
+            "android_subtitle": c.home.android_subtitle,
+            "ios_title": c.home.ios_title,
+            "ios_subtitle": c.home.ios_subtitle,
+            "message_title": c.home.message_title,
+            "message_subtitle": c.home.message_subtitle,
+        },
+        "consent": {
+            "title": c.consent.title,
+            "footer": c.consent.footer,
+            "checkbox": c.consent.checkbox,
+            "button": c.consent.button,
+            "disclosure_android": c.consent.disclosure_android,
+            "disclosure_ios": c.consent.disclosure_ios,
+            "disclosure_message": c.consent.disclosure_message,
+        },
+        "my_data": {
+            "title": c.my_data.title,
+            "device_heading": c.my_data.device_heading,
+            "artefacts_heading": c.my_data.artefacts_heading,
+            "empty": c.my_data.empty,
+            "clear_button": c.my_data.clear_button,
+        },
+        "android_bugreport": {
+            "title": c.android_bugreport.title,
+            "headline": c.android_bugreport.headline,
+            "body": c.android_bugreport.body,
+        },
+        "ios_sysdiagnose": {
+            "title": c.ios_sysdiagnose.title,
+            "headline": c.ios_sysdiagnose.headline,
+            "body": c.ios_sysdiagnose.body,
+        },
+        "message_report": {
+            "title": c.message_report.title,
+            "lead": c.message_report.lead,
+            "button": c.message_report.button,
+        },
+        "notifications": {
+            "encrypting_title": c.notifications.encrypting_title,
+            "uploading_title": c.notifications.uploading_title,
+            "uploading_progress_title": c.notifications.uploading_progress_title,
+            "complete_title": c.notifications.complete_title,
+            "failed_title": c.notifications.failed_title,
+            "complete_body": c.notifications.complete_body,
+            "failed_body": c.notifications.failed_body,
+        },
+    })
+}
+
+fn sanitize_strings_i18n(mut s: TenantStringsI18n) -> TenantStringsI18n {
+    s.tagline = clip_opt(s.tagline, 120);
+    s.enroll_lead = clip_opt(s.enroll_lead, 400);
+    s.otp_notification_subject = clip_opt(s.otp_notification_subject, 160);
+    s.otp_notification_body = clip_opt(s.otp_notification_body, 2000);
+    s
+}
+
+fn sanitize_i18n_maps(
+    enabled: &[String],
+    copy_i18n: std::collections::BTreeMap<String, serde_json::Value>,
+    strings_i18n: std::collections::BTreeMap<String, TenantStringsI18n>,
+) -> (
+    std::collections::BTreeMap<String, serde_json::Value>,
+    std::collections::BTreeMap<String, TenantStringsI18n>,
+) {
+    let enabled: std::collections::BTreeSet<_> = enabled.iter().cloned().collect();
+    let mut out_copy = std::collections::BTreeMap::new();
+    for (k, v) in copy_i18n {
+        let Some(code) = sanitize_locale_code(&k) else { continue };
+        if code == "en" || !enabled.contains(&code) {
+            continue;
+        }
+        if !v.is_object() {
+            continue;
+        }
+        let copy = branding_copy_from_partial(&v);
+        out_copy.insert(code, branding_copy_to_partial_json(&copy));
+    }
+    let mut out_strings = std::collections::BTreeMap::new();
+    for (k, v) in strings_i18n {
+        let Some(code) = sanitize_locale_code(&k) else { continue };
+        if code == "en" || !enabled.contains(&code) {
+            continue;
+        }
+        out_strings.insert(code, sanitize_strings_i18n(v));
+    }
+    (out_copy, out_strings)
 }
 fn default_collectors() -> Vec<String> {
     vec![
@@ -495,10 +855,16 @@ pub struct BrandingPatch {
     pub server_base_url: Option<String>,
     pub support_contact: Option<String>,
     pub privacy_policy_url: Option<String>,
+    pub default_locale: Option<String>,
+    pub enabled_locales: Option<Vec<String>>,
+    pub otp_notification_subject: Option<String>,
+    pub otp_notification_body: Option<String>,
     pub seed_color: Option<String>,
     pub launcher_icon: Option<LauncherIconStyle>,
     pub enabled_collectors: Option<Vec<String>>,
     pub copy: Option<BrandingCopy>,
+    pub copy_i18n: Option<std::collections::BTreeMap<String, serde_json::Value>>,
+    pub strings_i18n: Option<std::collections::BTreeMap<String, TenantStringsI18n>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -972,6 +1338,65 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Resolve the lab title shown in the mobile app for a company.
+/// Prefers that company's branding `display_name`, then the company name,
+/// then the global lab display name (for the shared default company).
+pub fn company_lab_identity(
+    data_dir: &Path,
+    company_id: &str,
+    company_name: &str,
+    global_display_name: &str,
+) -> (String, String) {
+    let name = {
+        let t = company_name.trim();
+        if !t.is_empty() {
+            t.to_string()
+        } else if company_id == DEFAULT_COMPANY_ID {
+            "Default (shared)".into()
+        } else if !company_id.trim().is_empty() {
+            company_id.to_string()
+        } else {
+            global_display_name.trim().to_string()
+        }
+    };
+
+    migrate_legacy_flat_branding(data_dir);
+    let company_root = company_branding_dir(data_dir, company_id);
+    migrate_company_to_versions(&company_root);
+    let idx = read_versions_index(&company_root);
+    let version = if !idx.active.trim().is_empty() {
+        idx.active
+    } else if let Some(v) = idx.versions.first() {
+        v.clone()
+    } else {
+        DEFAULT_VERSION.to_string()
+    };
+    let tenant_path = company_root.join(&version).join(TENANT_FILE);
+    let legacy_tenant_path = company_root.join(TENANT_FILE);
+    for path in [&tenant_path, &legacy_tenant_path] {
+        if let Some(tenant) = read_json_file::<BrandingTenant>(path) {
+            let dn = tenant.display_name.trim();
+            if !dn.is_empty() {
+                return (name, dn.to_string());
+            }
+        }
+    }
+
+    if company_id == DEFAULT_COMPANY_ID {
+        let global = global_display_name.trim();
+        (
+            name,
+            if global.is_empty() {
+                default_display_name()
+            } else {
+                global.to_string()
+            },
+        )
+    } else {
+        (name.clone(), name)
+    }
+}
+
 fn resolve_company(
     state: &AppState,
     raw: Option<&str>,
@@ -1036,19 +1461,91 @@ fn default_tenant(public_url: &str, display_name: &str, tenant_id: &str) -> Bran
             display_name.to_string()
         },
         tagline: "Secure artefact collection".into(),
-        enroll_lead:
-            "Enter your work email to receive a one-time code, or use a lab key for local testing."
-                .into(),
+        enroll_lead: "Enter your work email to receive a one-time verification code.".into(),
         server_base_url: public_url.trim_end_matches('/').to_string(),
         support_contact: "support@collectemoi.example".into(),
         privacy_policy_url: "https://collectemoi.example/privacy".into(),
         default_locale: default_locale(),
+        enabled_locales: default_enabled_locales(),
         mode: default_mode(),
         enabled_collectors: default_collectors(),
         tls_pins_spki_sha256: vec![],
         case_encryption_public_key_hex: String::new(),
+        otp_notification_subject: default_otp_notification_subject(),
+        otp_notification_body: default_otp_notification_body(),
         copy: default_branding_copy(),
+        copy_i18n: std::collections::BTreeMap::new(),
+        strings_i18n: std::collections::BTreeMap::new(),
     }
+}
+
+fn fill_otp_placeholders(
+    template: &str,
+    company_name: &str,
+    display_name: &str,
+    email: &str,
+    code: &str,
+    expires_in_secs: u64,
+) -> String {
+    let mins = expires_in_secs.div_ceil(60).max(1);
+    template
+        .replace("{code}", code)
+        .replace("{company_name}", company_name)
+        .replace("{display_name}", display_name)
+        .replace("{email}", email)
+        .replace("{expires_in_secs}", &expires_in_secs.to_string())
+        .replace("{expires_in_mins}", &mins.to_string())
+}
+
+/// Load active branding OTP templates for a company and render subject/body.
+pub fn render_otp_notification(
+    data_dir: &Path,
+    company_id: &str,
+    company_name: &str,
+    display_name: &str,
+    email: &str,
+    code: &str,
+    expires_in_secs: u64,
+) -> (String, String) {
+    migrate_legacy_flat_branding(data_dir);
+    let company_root = company_branding_dir(data_dir, company_id);
+    migrate_company_to_versions(&company_root);
+    let idx = read_versions_index(&company_root);
+    let version = if !idx.active.trim().is_empty() {
+        idx.active
+    } else if let Some(v) = idx.versions.first() {
+        v.clone()
+    } else {
+        DEFAULT_VERSION.to_string()
+    };
+    let tenant_path = company_root.join(&version).join(TENANT_FILE);
+    let legacy_tenant_path = company_root.join(TENANT_FILE);
+    let mut subject = default_otp_notification_subject();
+    let mut body = default_otp_notification_body();
+    for path in [&tenant_path, &legacy_tenant_path] {
+        if let Some(tenant) = read_json_file::<BrandingTenant>(path) {
+            let s = tenant.otp_notification_subject.trim();
+            if !s.is_empty() {
+                subject = s.to_string();
+            }
+            let b = tenant.otp_notification_body.trim();
+            if !b.is_empty() {
+                body = b.to_string();
+            }
+            break;
+        }
+    }
+    (
+        fill_otp_placeholders(
+            &subject,
+            company_name,
+            display_name,
+            email,
+            code,
+            expires_in_secs,
+        ),
+        fill_otp_placeholders(&body, company_name, display_name, email, code, expires_in_secs),
+    )
 }
 
 fn read_json_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Option<T> {
@@ -1267,6 +1764,19 @@ fn branding_asset_query(company_id: &str, version: &str) -> String {
     }
 }
 
+const I18N_CATALOG_JSON: &str = include_str!("../static/i18n_catalog.json");
+
+/// Built-in FR/ES dictionary used to preview auto-translations of English branding copy.
+pub async fn get_i18n_catalog() -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match serde_json::from_str::<serde_json::Value>(I18N_CATALOG_JSON) {
+        Ok(v) => Ok(Json(v)),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("i18n catalog: {e}") })),
+        )),
+    }
+}
+
 pub async fn get_branding(
     State(state): State<AppState>,
     Query(q): Query<BrandingQuery>,
@@ -1347,6 +1857,32 @@ pub async fn put_branding(
     if let Some(v) = patch.privacy_policy_url {
         tenant.privacy_policy_url = v.chars().take(300).collect();
     }
+    if let Some(v) = patch.default_locale {
+        tenant.default_locale =
+            sanitize_locale_code(&v).unwrap_or_else(|| default_locale());
+    }
+    if let Some(v) = patch.enabled_locales {
+        tenant.enabled_locales = sanitize_enabled_locales(v, &tenant.default_locale);
+    } else {
+        tenant.enabled_locales =
+            sanitize_enabled_locales(tenant.enabled_locales.clone(), &tenant.default_locale);
+    }
+    if let Some(v) = patch.otp_notification_subject {
+        let t = v.trim();
+        tenant.otp_notification_subject = if t.is_empty() {
+            default_otp_notification_subject()
+        } else {
+            clip_copy(t.to_string(), 160)
+        };
+    }
+    if let Some(v) = patch.otp_notification_body {
+        let t = v.trim();
+        tenant.otp_notification_body = if t.is_empty() {
+            default_otp_notification_body()
+        } else {
+            clip_copy(t.to_string(), 2000)
+        };
+    }
     if let Some(v) = patch.seed_color {
         let t = v.trim();
         if t.starts_with('#') && (t.len() == 7 || t.len() == 4) {
@@ -1397,6 +1933,23 @@ pub async fn put_branding(
     }
     if let Some(copy) = patch.copy {
         tenant.copy = sanitize_copy(copy);
+    }
+    if patch.copy_i18n.is_some() || patch.strings_i18n.is_some() {
+        let copy_i18n = patch.copy_i18n.unwrap_or_else(|| tenant.copy_i18n.clone());
+        let strings_i18n = patch
+            .strings_i18n
+            .unwrap_or_else(|| tenant.strings_i18n.clone());
+        let (c, s) = sanitize_i18n_maps(&tenant.enabled_locales, copy_i18n, strings_i18n);
+        tenant.copy_i18n = c;
+        tenant.strings_i18n = s;
+    } else {
+        let (c, s) = sanitize_i18n_maps(
+            &tenant.enabled_locales,
+            tenant.copy_i18n.clone(),
+            tenant.strings_i18n.clone(),
+        );
+        tenant.copy_i18n = c;
+        tenant.strings_i18n = s;
     }
 
     write_json_pretty(&root.join(TENANT_FILE), &tenant).map_err(|e| {
@@ -2343,8 +2896,11 @@ fn run_build_job(
     }
 
     // Collect published artefacts and copy into company/version folder.
+    // Only copy *flat* publish dirs (not company subfolders) so old branded
+    // builds are not re-copied into the active branding version.
     let company_mobile = data_dir.join("mobile").join(company_id).join(version);
     let _ = fs::create_dir_all(&company_mobile);
+    let mut published_names: Vec<String> = Vec::new();
     for dir in [data_dir.join("mobile"), repo.join("dist/mobile")] {
         if let Ok(entries) = fs::read_dir(&dir) {
             for e in entries.flatten() {
@@ -2362,12 +2918,32 @@ fn run_build_job(
                             artefacts.push(name.to_string());
                         }
                         if ok_all {
-                            let _ = fs::copy(&p, company_mobile.join(name));
+                            let dest = company_mobile.join(name);
+                            let _ = fs::copy(&p, &dest);
+                            published_names.push(name.to_string());
+                            // Keep SHA/version sidecar with the published copy.
+                            let meta_src = {
+                                let mut s = p.as_os_str().to_owned();
+                                s.push(".meta.json");
+                                PathBuf::from(s)
+                            };
+                            if meta_src.is_file() {
+                                let mut meta_dst = dest.as_os_str().to_owned();
+                                meta_dst.push(".meta.json");
+                                let _ = fs::copy(&meta_src, PathBuf::from(meta_dst));
+                            }
                         }
                     }
                 }
             }
         }
+    }
+
+    // Drop superseded app builds (e.g. 1.0.8 APK left under branding 1.0.12).
+    let mut pruned = 0usize;
+    if ok_all {
+        pruned += prune_superseded_mobile_builds(&company_mobile, &published_names);
+        pruned += prune_superseded_mobile_builds(&data_dir.join("mobile"), &published_names);
     }
 
     if ok_all {
@@ -2376,8 +2952,13 @@ fn run_build_job(
             "publish",
             StepStatus::Done,
             &format!(
-                "{} file(s) → data/mobile/{company_id}/{version}/",
-                artefacts.len()
+                "{} file(s) → data/mobile/{company_id}/{version}/{}",
+                artefacts.len(),
+                if pruned > 0 {
+                    format!(" · pruned {pruned} older app build(s)")
+                } else {
+                    String::new()
+                }
             ),
         );
     }
@@ -2405,4 +2986,85 @@ fn run_build_job(
     job.artefacts = artefacts;
     save_job(data_dir, company_id, &job);
     gate.end();
+}
+
+/// Versioned app artefacts look like `collectemoi-1.0.8-debug.apk`.
+fn is_versioned_mobile_name(name: &str) -> bool {
+    let stem = name
+        .strip_suffix(".apk")
+        .or_else(|| name.strip_suffix(".ipa"))
+        .or_else(|| name.strip_suffix(".zip"))
+        .unwrap_or(name);
+    let Some(rest) = stem.strip_prefix("collectemoi-") else {
+        return false;
+    };
+    // 1.2.3 or 1.2.3-debug / 1.2.3+10012 …
+    let ver = rest.split(['-', '+']).next().unwrap_or("");
+    let mut parts = ver.split('.');
+    matches!(
+        (parts.next(), parts.next(), parts.next(), parts.next()),
+        (Some(a), Some(b), Some(c), None)
+            if !a.is_empty()
+                && !b.is_empty()
+                && !c.is_empty()
+                && a.chars().all(|ch| ch.is_ascii_digit())
+                && b.chars().all(|ch| ch.is_ascii_digit())
+                && c.chars().all(|ch| ch.is_ascii_digit())
+    )
+}
+
+fn is_mobile_alias_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "collectemoi-latest.apk"
+            | "collectemoi-latest.ipa"
+            | "collectemoi-debug.apk"
+            | "collectemoi-release.apk"
+            | "collectemoi-profile.apk"
+            | "collectemoi-debug.ipa"
+            | "collectemoi-release.ipa"
+            | "collectemoi-profile.ipa"
+    )
+}
+
+/// Remove older versioned APK/IPA files not in `keep`, leaving aliases alone.
+fn prune_superseded_mobile_builds(dir: &Path, keep: &[String]) -> usize {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    let keep: std::collections::HashSet<&str> = keep.iter().map(String::as_str).collect();
+    let mut removed = 0usize;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if name.ends_with(".meta.json") {
+            continue;
+        }
+        if is_mobile_alias_name(name) {
+            continue;
+        }
+        if !is_versioned_mobile_name(name) {
+            continue;
+        }
+        if keep.contains(name) {
+            continue;
+        }
+        let meta = {
+            let mut s = path.as_os_str().to_owned();
+            s.push(".meta.json");
+            PathBuf::from(s)
+        };
+        if fs::remove_file(&path).is_ok() {
+            removed += 1;
+            let _ = fs::remove_file(meta);
+            tracing::info!(file = %path.display(), "pruned superseded mobile build");
+        }
+    }
+    removed
 }

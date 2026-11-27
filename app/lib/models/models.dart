@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 enum ArtefactKind {
   androidBugreport,
   iosSysdiagnose,
@@ -13,6 +15,16 @@ enum ArtefactKind {
     ArtefactKind.androidBugreport => 'Android bugreport',
     ArtefactKind.iosSysdiagnose => 'iOS sysdiagnose',
     ArtefactKind.messageReport => 'Suspicious message',
+  };
+
+  /// Hide the other phone OS collector so Android users never see sysdiagnose
+  /// and iPhone users never see bugreport. Web/desktop keep both for lab use.
+  bool get availableOnThisDevice => switch (this) {
+    ArtefactKind.androidBugreport =>
+      kIsWeb || defaultTargetPlatform == TargetPlatform.android,
+    ArtefactKind.iosSysdiagnose =>
+      kIsWeb || defaultTargetPlatform == TargetPlatform.iOS,
+    ArtefactKind.messageReport => true,
   };
 }
 
@@ -76,6 +88,15 @@ class EnrollmentSession {
     this.noiseKeyFingerprint,
     this.email,
     this.companyId,
+    this.companyName,
+    this.devicePlatform,
+    this.deviceModel,
+    this.deviceOsVersion,
+    this.deviceManufacturer,
+    this.deviceBrand,
+    this.deviceName,
+    this.deviceDetails = const {},
+    this.appVersion,
   });
 
   final String deviceId;
@@ -92,6 +113,69 @@ class EnrollmentSession {
   final String? email;
   final String? companyId;
 
+  /// Human company name from the server (enrollment / branding).
+  final String? companyName;
+
+  /// Captured at enroll from the phone (also sent to the server).
+  final String? devicePlatform;
+  final String? deviceModel;
+  final String? deviceOsVersion;
+  final String? deviceManufacturer;
+  final String? deviceBrand;
+  final String? deviceName;
+  final Map<String, String> deviceDetails;
+
+  /// App `version+build` reported on every API packet (e.g. `0.1.0+1`).
+  final String? appVersion;
+
+  EnrollmentSession copyWith({
+    String? displayName,
+    String? serverBaseUrl,
+    String? appVersion,
+  }) {
+    return EnrollmentSession(
+      deviceId: deviceId,
+      caseId: caseId,
+      devicePublicKeyHex: devicePublicKeyHex,
+      devicePrivateKeyHex: devicePrivateKeyHex,
+      casePublicKeyHex: casePublicKeyHex,
+      serverBaseUrl: serverBaseUrl ?? this.serverBaseUrl,
+      displayName: displayName ?? this.displayName,
+      noiseKeyHex: noiseKeyHex,
+      noiseKeyFingerprint: noiseKeyFingerprint,
+      email: email,
+      companyId: companyId,
+      companyName: companyName,
+      devicePlatform: devicePlatform,
+      deviceModel: deviceModel,
+      deviceOsVersion: deviceOsVersion,
+      deviceManufacturer: deviceManufacturer,
+      deviceBrand: deviceBrand,
+      deviceName: deviceName,
+      deviceDetails: deviceDetails,
+      appVersion: appVersion ?? this.appVersion,
+    );
+  }
+
+  bool get hasDeviceInfo =>
+      (deviceModel?.isNotEmpty ?? false) ||
+      (deviceOsVersion?.isNotEmpty ?? false) ||
+      (devicePlatform?.isNotEmpty ?? false);
+
+  String get deviceSummary {
+    final parts = <String>[
+      if ((deviceManufacturer ?? '').isNotEmpty &&
+          !(deviceModel ?? '')
+              .toLowerCase()
+              .startsWith(deviceManufacturer!.toLowerCase()))
+        deviceManufacturer!,
+      if ((deviceModel ?? '').isNotEmpty) deviceModel!,
+      if ((deviceOsVersion ?? '').isNotEmpty) deviceOsVersion!,
+    ];
+    if (parts.isNotEmpty) return parts.join(' · ');
+    return devicePlatform ?? '';
+  }
+
   Map<String, dynamic> toJson() => {
     'device_id': deviceId,
     'case_id': caseId,
@@ -105,9 +189,26 @@ class EnrollmentSession {
       'noise_key_fingerprint': noiseKeyFingerprint,
     if (email != null) 'email': email,
     if (companyId != null) 'company_id': companyId,
+    if (companyName != null) 'company_name': companyName,
+    if (devicePlatform != null) 'device_platform': devicePlatform,
+    if (deviceModel != null) 'device_model': deviceModel,
+    if (deviceOsVersion != null) 'device_os_version': deviceOsVersion,
+    if (deviceManufacturer != null) 'device_manufacturer': deviceManufacturer,
+    if (deviceBrand != null) 'device_brand': deviceBrand,
+    if (deviceName != null) 'device_name': deviceName,
+    if (deviceDetails.isNotEmpty) 'device_details': deviceDetails,
+    if (appVersion != null) 'app_version': appVersion,
   };
 
   factory EnrollmentSession.fromJson(Map<String, dynamic> json) {
+    final rawDetails = json['device_details'];
+    final details = <String, String>{};
+    if (rawDetails is Map) {
+      for (final e in rawDetails.entries) {
+        final v = e.value?.toString().trim() ?? '';
+        if (v.isNotEmpty) details[e.key.toString()] = v;
+      }
+    }
     return EnrollmentSession(
       deviceId: json['device_id'] as String,
       caseId: json['case_id'] as String,
@@ -120,6 +221,15 @@ class EnrollmentSession {
       noiseKeyFingerprint: json['noise_key_fingerprint'] as String?,
       email: json['email'] as String?,
       companyId: json['company_id'] as String?,
+      companyName: json['company_name'] as String?,
+      devicePlatform: json['device_platform'] as String?,
+      deviceModel: json['device_model'] as String?,
+      deviceOsVersion: json['device_os_version'] as String?,
+      deviceManufacturer: json['device_manufacturer'] as String?,
+      deviceBrand: json['device_brand'] as String?,
+      deviceName: json['device_name'] as String?,
+      deviceDetails: details,
+      appVersion: json['app_version'] as String?,
     );
   }
 }
@@ -136,6 +246,9 @@ class UploadJob {
     this.error,
     this.progress = 0,
     this.payloadPath,
+    this.consentGiven = false,
+    this.blocked = false,
+    this.summary = '',
   });
 
   final String id;
@@ -151,9 +264,22 @@ class UploadJob {
   /// Absolute path to durable plaintext under app documents (native only).
   String? payloadPath;
 
+  /// User already accepted consent once — resend can skip the consent screen.
+  bool consentGiven;
+
+  /// Server rejected this device (banned). Resend kept available after unban.
+  bool blocked;
+
+  /// Legacy field; kept for job JSON compatibility (not shown in UI).
+  String summary;
+
   bool get canResumeConsent =>
       status == UploadJobStatus.pendingConsent ||
       status == UploadJobStatus.failed;
+
+  /// One-tap resend without going through consent again.
+  bool get canResendFast =>
+      status == UploadJobStatus.failed && consentGiven;
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -166,6 +292,9 @@ class UploadJob {
     'error': error,
     'progress': progress,
     if (payloadPath != null) 'payload_path': payloadPath,
+    'consent_given': consentGiven,
+    'blocked': blocked,
+    if (summary.isNotEmpty) 'summary': summary,
   };
 
   factory UploadJob.fromJson(Map<String, dynamic> json) {
@@ -183,6 +312,9 @@ class UploadJob {
       error: json['error'] as String?,
       progress: (json['progress'] as num?)?.toDouble() ?? 0,
       payloadPath: json['payload_path'] as String?,
+      consentGiven: json['consent_given'] as bool? ?? false,
+      blocked: json['blocked'] as bool? ?? false,
+      summary: (json['summary'] as String?)?.trim() ?? '',
     );
   }
 }

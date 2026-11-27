@@ -1,162 +1,451 @@
 # CollecteMoi
 
-White-label Flutter app (Android, iOS, web lab) + Rust server that moves forensic artefacts — Android bugreport, iOS sysdiagnose, suspicious messages — encrypted as **CM01** envelopes to the case key.
+White-label Flutter app (Android, iOS, web lab) + Rust server that moves forensic artefacts — Android bugreport, iOS sysdiagnose, suspicious messages — from a phone to the lab, encrypted as **CM01** envelopes to the case key.
 
-Design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Deep design notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+---
+
+## What it does
+
+| Actor | Role |
+| --- | --- |
+| **Tenant / company** | Owns domains, branding, lab keys, and the server |
+| **Analyst** | Runs the admin console, downloads decrypted blobs, builds branded apps |
+| **User** | Enrolls a phone, follows a guided collector, consents, then leaves the upload to finish in the background |
+
+**Artefacts collected today**
+
+- **Android bugreport** — system ZIP via Developer options + share sheet  
+- **iOS sysdiagnose** — hardware button combo + Files / share  
+- **Suspicious message** — text, metadata, optional screenshots  
+
+The server stores **opaque** decrypted blobs. It does not parse bugreports or sysdiagnoses.
+
+---
+
+## How it works
+
+### Encryption layers (read this first)
+
+Every network hop uses **TLS (HTTPS)** by default. Artefact bytes get two *application* layers on top of that:
+
+| Layer | What it protects | Algorithm / keys | Who can open it |
+| --- | --- | --- | --- |
+| **TLS / HTTPS** | Wire traffic (enroll JSON, upload chunks, admin UI, webhook) | TLS 1.2+ (self-signed lab cert or your PEMs) | Anyone with the TLS session (API process sees HTTP after terminate) |
+| **CM01** | Artefact plaintext end-to-end to the case | HPKE-X25519 + STREAM ChaCha20-Poly1305 + P-256 device signature | Holder of **case secret key** (`data/keys/case.sk.hex`) — the worker |
+| **CMNK** | CM01 blob in transit / staging (per device) | ChaCha20-Poly1305 with the **noise key** from enroll | API/worker that stored that device’s noise key |
+
+```text
+plaintext artefact
+    │  seal on device (or POST /v1/lab/seal for web)
+    ▼
+ CM01  ── encrypted to case public key ──► only case SK opens this
+    │  wrap with device noise key
+    ▼
+ CMNK(CM01)
+    │  send over HTTPS (TLS)
+    ▼
+ API writes ciphertext shards under data/uploads/
+    │  worker: TLS not involved (local disk)
+    ▼
+ unwrap CMNK → open CM01 → plaintext under data/blobs/
+```
+
+**Important:** TLS stops at the API. Staging under `data/uploads/` is still **CMNK(CM01) ciphertext**. After the worker decrypts, `data/blobs/` holds **plaintext** (filesystem ACL / disk encryption are your responsibility). Admin downloads of blobs are plaintext again over **HTTPS + admin session**.
+
+---
+
+### Big picture
+
+```mermaid
+flowchart LR
+  subgraph Phone["User phone / lab client"]
+    PT["Plaintext artefact\nZIP / tar.gz / JSON"]
+    App["CollecteMoi app"]
+    PT -->|"on-device seal"| App
+  end
+
+  subgraph Wire["Network"]
+    TLS["TLS / HTTPS\n(confidentiality + integrity of HTTP)"]
+  end
+
+  subgraph Lab["Lab host"]
+    API["collectemoi-api\nTLS terminator"]
+    Worker["collectemoi-worker\nlocal process"]
+    DB[("SQLite metadata\nkeys hashes ids\nnot artefact plaintext")]
+    Staging["data/uploads/\nCIPHERTEXT\nCMNK(CM01) shards"]
+    Blobs["data/blobs/\nPLAINTEXT\nopaque bytes"]
+  end
+
+  App -->|"1 enroll JSON\n2 upload body =\nCMNK(CM01)\nall inside TLS"| TLS
+  TLS --> API
+  API --> DB
+  API -->|"store only ciphertext"| Staging
+  API -->|"job queue meta"| Worker
+  Worker -->|"read CMNK(CM01)"| Staging
+  Worker -->|"unwrap CMNK\nopen CM01 with case SK"| Blobs
+  Worker --> DB
+  Analyst["Analyst browser / TUI"] -->|"HTTPS + cookie\nadmin auth"| API
+  API -->|"HTTPS download\nPLAINTEXT blob"| Analyst
+```
+
+**Crypto boundaries**
+
+1. **On device:** plaintext → **CM01** (to case public key) → wrap **CMNK** (device noise key). Web/desktop without FFI may call `POST /v1/lab/seal` (lab-only; plaintext briefly hits the API).  
+2. **On the wire:** that ciphertext rides inside **TLS**.  
+3. **On API disk (`uploads/`):** still **ciphered** as CMNK(CM01) until the worker runs.  
+4. **After worker (`blobs/`):** **plaintext** opaque file; download is TLS-protected to the analyst, not re-sealed as CM01.
+
+---
+
+### Enrollment
+
+Work email must match a **company domain**. Lab keys skip the mailbox (lab / demo only).  
+All app ↔ API calls below are **HTTPS (TLS)**. The OTP code itself is **not** CM01 — it is sensitive JSON inside TLS (and then whatever your mail/SMS provider does).
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as User app
+  participant TLS as TLS session
+  participant API as collectemoi-api
+  participant Mail as OTP webhook
+  participant DB as SQLite
+
+  Note over U,TLS: Transport = HTTPS / TLS\n(payloads below are JSON, not CM01)
+
+  alt Email OTP
+    U->>TLS: POST /v1/enroll/start {email}
+    TLS->>API: decrypted HTTP
+    API->>DB: match domain, device slot
+    API->>Mail: HTTPS POST JSON\n{code, subject, body, …}
+    Note over Mail: Provider may store/send\nOTP in clear toward inbox/SMS
+    Mail-->>U: one-time code
+    U->>TLS: POST /v1/enroll/confirm\n{code, device_pk, noise_key}
+    TLS->>API: decrypted HTTP
+  else Lab key
+    U->>TLS: POST /v1/enroll/start {lab_key}
+    TLS->>API: decrypted HTTP
+    Note over API: no webhook
+    U->>TLS: POST /v1/enroll/confirm\n{lab code/key, keys}
+    TLS->>API: decrypted HTTP
+  end
+
+  API->>DB: store device_pk +\nnoise key material
+  API-->>TLS: session JSON\n{case_id, case_pk, …}
+  TLS-->>U: TLS-protected response
+  Note over U: App keeps soft device SK +\nnoise key locally for CMNK
+```
+
+**OTP notification text** is customized per company under **Client apps → Menus → Enroll** (`{code}`, `{company_name}`, `{display_name}`, `{email}`, `{expires_in_mins}`…). The API fills placeholders and sends `subject` / `body` on the webhook JSON.
+
+**Defaults:** 6-digit code, 10 min TTL, `max_devices_per_email` = 1 (0 = unlimited). Re-enrolling the same device key for the same email is allowed.
+
+---
+
+### Collect → consent → upload
+
+```mermaid
+flowchart TD
+  A[Home: pick collector] --> B{Artefact type}
+  B -->|Android| C[Guided Developer options\n→ share ZIP into app]
+  B -->|iOS| D[Button combo → wait\n→ Files / share into app]
+  B -->|Message| E[Paste / screenshots\n→ JSON payload]
+  B -->|Lab file| F[Pick any file]
+
+  C --> G[Validate locally\nPLAINTEXT on device]
+  D --> G
+  E --> G
+  F --> G
+
+  G --> H[Consent screen]
+  H --> I["Seal CM01\nHPKE → case PK\n+ device P-256 sig\nnative FFI or /v1/lab/seal"]
+  I --> J["Wrap CMNK\nChaCha20-Poly1305\nnoise key from enroll"]
+  J --> K["Chunked upload over HTTPS/TLS\nbody = CMNK(CM01) ciphertext\n+ per-chunk SHA-256"]
+  K --> L[Foreground / system\nnotifications while uploading]
+  L --> M[My data: local status\n+ server submission history]
+```
+
+**Upload protocol (all clients)**
+
+```mermaid
+sequenceDiagram
+  participant App
+  participant TLS as HTTPS / TLS
+  participant API as collectemoi-api
+  participant Disk as data/uploads\nCIPHERTEXT
+  participant Worker
+  participant Blobs as data/blobs\nPLAINTEXT
+
+  Note over App: Before network:\nplaintext → CM01 → CMNK(CM01)
+
+  App->>TLS: POST /v1/uploads\n{size, SHA-256 of CMNK blob, artefact}
+  TLS->>API: HTTP after TLS terminate
+  API-->>App: upload_id (via TLS)
+
+  loop each chunk of CMNK(CM01)
+    App->>TLS: PUT chunk bytes + digest
+    TLS->>API: ciphertext chunk
+    API->>Disk: append shard\n(still CMNK ciphertext)
+  end
+
+  App->>TLS: POST complete + device_pk
+  TLS->>API: finalize
+  API->>API: enqueue decrypt job
+
+  Note over Worker,Disk: Local disk — no TLS\n(worker and API share data-dir)
+
+  Worker->>Disk: read CMNK(CM01)
+  Worker->>Worker: 1 unwrap CMNK with noise key\n2 open CM01 with case SK
+  Worker->>Blobs: write opaque PLAINTEXT
+  Worker->>API: job done + blob meta in SQLite
+```
+
+**Upload notification copy** (encrypting / uploading / complete / failed) is branded under **Client apps → Menus → Upload notifications** and baked into the APK/IPA.
+
+---
+
+### App menus (Flutter) → server requests
+
+All client routes talk to the API over **HTTPS (TLS)**. After enroll, almost every call also carries device identity headers (not a Bearer token):
+
+| Header | Meaning |
+| --- | --- |
+| `x-device-id` | Enrolled device UUID |
+| `x-app-version` | Flutter `version+build` |
+| `x-device-platform` / `x-device-model` / `x-device-os` | Hardware / OS line |
+| `x-device-manufacturer` / `x-device-brand` / `x-device-name` | Vendor / marketing name |
+| `x-device-security-patch` / `x-device-api-level` / `x-device-build-id` | Android patch / API / build (when known) |
+
+```mermaid
+flowchart TB
+  Enroll["/enroll"] --> Home["/  Home"]
+  Home --> Android["/collect/android-bugreport"]
+  Home --> Ios["/collect/ios-sysdiagnose"]
+  Home --> Msg["/collect/message"]
+  Home --> Lab["/lab/upload"]
+  Home --> MyData["/my-data"]
+  Home --> Settings["/settings"]
+  Android --> Consent["/consent/:jobId"]
+  Ios --> Consent
+  Msg --> Consent
+  Lab --> Consent
+  Consent -->|"background upload"| MyData
+```
+
+#### Enroll (`/enroll`)
+
+| Step | Client action | Server |
+| --- | --- | --- |
+| 1 | User enters work email (or lab key) | `POST /v1/enroll/start` JSON `{ email }` or `{ lab_key }` |
+| 2 | API matches company domain / lab key; OTP webhook if email | (TLS only; OTP is **not** CM01) |
+| 3 | User enters code; app generates device P-256 key + noise key + device snapshot | `POST /v1/enroll/confirm` `{ challenge_id, code, device_public_key, noise_key, platform, model, os_version, manufacturer, brand, name, details, app_version }` |
+| 4 | Session stored on phone | Response: `device_id`, `case_id`, `case_public_key`, `display_name`, `noise_key_fingerprint`, company fields |
+
+Optional legacy: `POST /v1/enroll` with a one-shot token (same identity body).
+
+```mermaid
+sequenceDiagram
+  participant App
+  participant API
+  App->>API: POST /v1/enroll/start
+  API-->>App: challenge_id (+ company hint)
+  App->>API: POST /v1/enroll/confirm + device keys + details
+  API-->>App: device_id + case_public_key + noise fingerprint
+```
+
+#### Home (`/`)
+
+| Step | Client action | Server |
+| --- | --- | --- |
+| Open / pull-to-refresh | Load open collection requests | `GET /v1/requests` |
+| Health chip (toolbar) | Reachability | `GET /healthz` |
+| Tiles | Navigate only (no upload yet) | — |
+
+#### Settings (`/settings`)
+
+| Step | Client action | Server |
+| --- | --- | --- |
+| Save server URL / open screen | Ping | `GET /healthz` |
+| Theme, lab-key toggle, trust self-signed | Local prefs only | — |
+| Clear enrollment (also from My data) | Wipe local session | — (lab data unchanged) |
+
+#### Android bugreport (`/collect/android-bugreport`)
+
+| Step | Client action | Server |
+| --- | --- | --- |
+| Guide + share / import ZIP | Validate locally; enqueue job + payload on disk | — |
+| Continue | → Consent | — |
+
+No HTTP until consent starts the upload.
+
+#### iOS sysdiagnose (`/collect/ios-sysdiagnose`)
+
+Same pattern as Android: local capture / Files import → enqueue → Consent. No HTTP until upload.
+
+#### Suspicious message (`/collect/message`)
+
+| Step | Client action | Server |
+| --- | --- | --- |
+| Compose channel / sender / body / screenshots | Build JSON payload (+ optional base64 images); enqueue with summary | — |
+| Continue | → Consent | — |
+
+`POST /v1/messages` exists as a stub; the real path is the CM01 upload below.
+
+#### Lab file upload (`/lab/upload`)
+
+Lab-only tile: pick any file → enqueue → Consent (same upload pipeline).
+
+#### Consent (`/consent/:jobId`)
+
+| Step | Client action | Server |
+| --- | --- | --- |
+| User checks consent | Starts background encrypt/upload; UI goes to My data | — |
+| Seal | On-device CM01 (native FFI) **or** lab fallback | Optional `POST /v1/lab/seal` (web / missing FFI; plaintext briefly on API) |
+| Wrap | CMNK with enroll noise key | — |
+| Upload | Chunked ciphertext | See table below |
+
+| Upload request | Method / path | Body |
+| --- | --- | --- |
+| Create | `POST /v1/uploads` | `{ case_id, artefact, total_size, chunk_size, chunk_count, ciphertext_sha256 }` |
+| Chunk | `PUT /v1/uploads/{id}/chunks/{n}` | raw bytes + `Digest: sha-256=…` |
+| Finish | `POST /v1/uploads/{id}/complete` | `{ device_public_key }` → API unwraps CMNK, verifies CM01, queues worker |
+
+Banned devices get `403` `{ "error": "device_banned" }` on create / chunk / complete.
+
+Per-device flood control is **server-only** (the app does not self-throttle). Each company has `device_uploads_per_hour` (default **10**, `0` = unlimited). `POST /v1/uploads` returns `429` `{ "error": "device_rate_limited" }` when the device exceeds that company quota in the rolling window (`--rate-limit-device-window-secs`, default 1 hour). Chunk PUTs are not counted. Admins can set **Bypass quota** on a device to ignore the company limit.
+
+```mermaid
+sequenceDiagram
+  participant App
+  participant API
+  participant Worker
+  App->>App: CM01 seal (+ optional POST /v1/lab/seal)
+  App->>App: CMNK wrap
+  App->>API: POST /v1/uploads
+  loop chunks
+    App->>API: PUT /v1/uploads/id/chunks/n
+  end
+  App->>API: POST /v1/uploads/id/complete
+  API->>Worker: decrypt job (local)
+```
+
+#### My data (`/my-data`)
+
+| Step | Client action | Server |
+| --- | --- | --- |
+| Open / refresh history | List what the lab holds for this device | `POST /v1/client/submissions` body = CMNK proof of `collectemoi-client-submissions-v1:{device_id}` |
+| Failed list | Resend / Delete (local payload) | Resend = same upload sequence as Consent |
+| Device card | Shows enroll snapshot (+ patch/API from later headers) | Headers on any call update `last_seen` / details |
+
+#### Headers refresh (any enrolled call)
+
+Whenever the app hits the API after boot, it re-captures device info and sends the `x-device-*` headers above. The API may merge `security_patch` / `api_level` / `build_id` into the device row (admin Devices view).
+
+---
+
+### White-label client apps
+
+Analysts brand and build apps from **Admin → Client apps** without changing Flutter source by hand.
+
+```mermaid
+flowchart LR
+  subgraph Admin["Admin → Client apps"]
+    Gen["General\nname, color, server URL,\ncollectors, languages"]
+    Menus["Menus\nper-screen copy +\nEN / FR / ES overrides"]
+    Build["Generate\nAPK / IPA"]
+  end
+
+  Gen --> Tenant["data/branding/\ncompany/version/\ntenant.json + theme + assets"]
+  Menus --> Tenant
+  Build --> Script["collectemoi-app\n--tenant-dir …"]
+  Tenant --> Script
+  Script --> Out["data/mobile/company/version/\nAPK · IPA + .meta.json"]
+  Out --> Download["Admin download / MDM"]
+```
+
+**Languages**
+
+- **General → App languages**: choose which of `en` / `fr` / `es` the build supports, plus default locale.  
+- **Menus**: English is the base; Français / Español tabs store overrides (`copy_i18n`, `strings_i18n`).  
+- Blank overrides → built-in dictionary lookup of the English string → English.  
+- Custom English text that is not in the dictionary will not auto-translate unless you fill FR/ES overrides.
+
+---
+
+### Admin & ops workflows
+
+Admin UI and TUI talk to the API over **HTTPS (TLS)** with an **HttpOnly cookie session** (+ optional TOTP / WebAuthn). Blob downloads are **plaintext artefact bytes** inside that TLS session (not CM01 again).
+
+```mermaid
+flowchart TB
+  subgraph Day0["Day 0"]
+    Start["collectemoictl start\nor Docker up\nTLS cert in data/tls/"]
+    Setup["HTTPS /admin\npassword + optional MFA"]
+    Co["Companies\ndomains, colors, max devices"]
+    Brand["Client apps\nbrand + generate APK/IPA"]
+    Start --> Setup --> Co --> Brand
+  end
+
+  subgraph DayN["Day N"]
+    Enroll["Users enroll\nHTTPS + later CMNK uploads"]
+    Pipe["Pipeline\nciphertext uploads → decrypt"]
+    Blobs["Blobs\nPLAINTEXT on disk\npreview / HTTPS download"]
+    Access["API access audit"]
+    Enroll --> Pipe --> Blobs
+    Pipe --> Access
+  end
+
+  Brand --> Enroll
+```
+
+| Area | What you do |
+| --- | --- |
+| **Overview** | Health, KPIs, bandwidth, attention |
+| **Pipeline** | Incomplete uploads, decrypt jobs |
+| **Blobs** | Metadata, download, delete; **message reports** show text + screenshot gallery |
+| **Devices** | Ban / unban; related blobs |
+| **Companies** | Domains, lab keys, tokens, pause enroll |
+| **Client apps** | Branding versions, languages, generate/stop builds |
+| **Settings** | Public URL, lab seal, CMDEV, OTP webhook, backup |
+| **Security** | Password, TOTP, WebAuthn |
+| **TUI** | `./scripts/collectemoictl tui` — same cookie login |
+
+---
 
 ## Status
 
 | Milestone | Status |
 | --- | --- |
-| Envelope + chunked upload + CLI | Done (`CM01`) |
+| Envelope + chunked upload + CLI | Done (`CM01` + `CMNK`) |
 | On-device / lab CM01 seal | Done (native FFI + `/v1/lab/seal` for web) |
-| Android bugreport path | Guided flow + ZIP validation; server stores opaque blob (no parsers) |
-| iOS sysdiagnose path | Guided flow + validator; Share Extension sources + App Group entitlements |
-| Lab admin console + process ctl | Done (`/admin`, `scripts/collectemoictl`) |
+| Android / iOS / message collectors | Done (guided flows + validation) |
+| Lab admin console + process ctl | Done (`/admin`, TUI, `collectemoictl`) |
+| White-label branding + APK/IPA | Done (multi-version, i18n, notifications) |
 | Node/TS desktop client | Done (`clients/node`) |
-| Message reports / white-label / production admin | Next |
-
----
-
-## Features
-
-### Server (`collectemoi-api` + `collectemoi-worker`)
-
-**Transport & crypto**
-- HTTPS by default with auto self-signed certs (`data/tls/`) or your own PEMs; optional plain HTTP companion
-- **CM01** envelopes (HPKE-X25519 + STREAM ChaCha20-Poly1305 + P-256 device signature)
-- Per-device **CMNK** noise wrap around CM01; optional legacy **CMDEV** when enabled in Settings
-- Artefact kinds: `android_bugreport`, `ios_sysdiagnose`, `message_report`
-
-**Enrollment**
-- Email OTP enroll (work email must match a company domain; 6-digit / 10 min TTL)
-- Lab shortcut keys (`LAB-DEMO01` …) skip the mailbox; seeded reusable tokens (`demo`, …)
-- Device P-256 public key + noise key exchange; banned keys rejected on enroll and upload
-- Soft tenant manifest + open collection requests; enrollment audit log
-
-**Uploads & storage**
-- Chunked upload protocol (create → chunks with SHA-256 digests → complete)
-- Sharded staging under `data/uploads/`; parallel clients with per-upload locks
-- Worker decrypts completed uploads into **opaque** blobs under `data/blobs/` (no bugreport/sysdiagnose parsers)
-- SQLite catalogue at `data/collectemoi.db` (devices, companies, lab keys, uploads, jobs, blobs, access + enrollment audits, admin auth)
-- Legacy JSON/JSONL imported once on first open
-
-**Admin console** ([`/admin`](https://127.0.0.1:8080/admin))
-- First-run password setup; HttpOnly cookie sessions
-- Optional MFA: TOTP and/or WebAuthn (YubiKey); change password; host-local recovery via `collectemoictl reset-password`
-- **Overview** — health, KPIs, pipeline pulse, API traffic, attention, recent enrollment, runtime
-- **Pipeline** — uploads and decrypt jobs with company / status filters
-- **Blobs** — list, metadata, streamed download, delete; download access summary
-- **Devices** — list, ban/unban
-- **API access** — traffic audit with kind / remote / status / path filters, clickable bars, blob links, and a copyable event sample
-- **Companies** — domains, per-company label color, devices, lab keys, tokens, branding/builds; pause blocks enroll
-- **Enrollment** — folded into Companies (tokens, lab keys, audit)
-- **Keys & bans** — ban client public keys
-- **Logs** — live API / worker / connection output (follow, filter, download)
-- **Client apps** — per-company, multi-version branding (name, text, colors, logo), live enroll and launcher previews, select the uploaded logo or icon as the launcher image, adjust its size and rotation, and customize optional icon text (font, size, color, badge, opacity, draggable X/Y placement), generate/stop APK/IPA with live build steps, download/delete artefacts (version + SHA-256), delete branding versions (keeps ≥1; optionally wipes matching `data/mobile/<company>/<version>/`)
-- **Settings** — display name, public URL, lab seal, allow CMDEV (persisted across restart)
-- **Security** — password, TOTP, YubiKey registration
-- **Backup** — export/import zip (`collectemoi.db` + optional keys/blobs)
-
-**Abuse / DDoS shields (application layer)**
-- Per-IP rolling rate limits (stricter for auth, enroll, lab seal; higher for upload chunks)
-- Automatic short cool-down after sustained rate-limit hits
-- Global concurrency cap (`--max-concurrent`) and per-request timeout (`--request-timeout-secs`)
-- Existing body-size limit + admin auth fail lockout; `/healthz` exempt from rate limits
-- Does **not** replace edge DDoS protection (CDN / reverse proxy / firewall) — lab process shield only
-
-**Lab helpers**
-- `POST /v1/lab/seal` — server-side CM01 seal for web / desktop when native FFI is unavailable
-- Blob list/get/content also on `/v1/blobs…` for lab convenience
-- Access audit middleware (optional `X-Device-Id` from clients)
-
-**Process control** (`scripts/collectemoictl`)
-- `start` / `stop` / `restart` / `status` / `health` / `doctor` / `logs` / `open` / `version`
-- `reset-password` (clears MFA by default; `--keep-mfa` / `--force-setup`)
-- `export` / `import` backup (live API or offline)
-- Builds binaries when sources (including embedded `admin.html`) change; frees orphan listeners on bind port
-
----
-
-### Clients
-
-**Flutter app** (`app/` — Android, iOS, web lab)
-- White-label tenant bundle (`tenant/default/`) — display name, server URL, collectors, support/privacy links
-- Client UI supports English, French, and Spanish, selected from the device/browser language; unsupported languages fall back to the tenant `default_locale`, then English
-- Enroll: email OTP, lab key, or QR scan of lab key; Server URL field or `--dart-define=COLLECTEMOI_SERVER_URL=…`
-- Soft device keys + noise key; durable local session
-- Collectors:
-  - **Android bugreport** — guided flow, Developer Options deep links, ZIP/dumpstate validation
-  - **iOS sysdiagnose** — guided flow, name/gzip validation, Files import; Share Extension sources ready
-  - **Suspicious message** — channel/sender/body/note/flags, URL detect, optional image → CM01 upload
-  - **Lab file upload** — arbitrary file through the same seal + chunk pipeline (web/desktop)
-- Consent screen before upload; on-disk payload store; upload queue with retry / discard
-- **My data** — local job status and retry controls, plus authenticated server-side submission history and clear local enrollment
-- Crypto: native FFI to `libcollectemoi_envelope` when present; PointyCastle + `/v1/lab/seal` on web
-- Lab builds via `scripts/collectemoi-app` → `dist/mobile` + `data/mobile` (admin download)
-
-**Node / TypeScript desktop** (`clients/node/`)
-- CLI: `enroll` (email / lab key / token), `requests`, `upload`, `collect`
-- Library: health, manifest, enroll, labSeal, chunked envelope upload
-- Local desktop UI (`scripts/collectemoi-client-ui` → `http://127.0.0.1:8090/`) — enroll, requests, seal & upload, session clear
-- `--insecure` / `--tls-ca` for lab self-signed certs
-
-**Rust CLI** (`collectemoi-cli`)
-- `gen-case-key` / `gen-device-key`
-- `seal` / `open` CM01 locally
-- `upload` — seal + chunked upload to the API
-
-**Mobile build tooling** (`scripts/collectemoi-app`)
-- `apk` / `ios` / `run` / `install` / `devices` / `emulators` / `doctor` / `clean` / `open`
-- Debug / profile / release; bake server URL; simulator or device iOS
-- Branding: `--tenant-dir`, `--display-name`, `--logo`, `--icon`, `--icon-scale`, `--icon-rotation`, `--icon-text` and its font/size/position/color/badge options (synced into Flutter tenant + launcher labels/icons; image compositing uses Swift/AppKit on macOS)
-- Publishes artefacts + `.meta.json` (version, SHA-256) for the admin **Client apps** panel
-- Admin can also trigger builds via **Client apps** (select company → Generate new build)
-
----
-
-### Lab limits (intentional today)
-
-- Open requests and tenant collectors are demo/hardcoded — not analyst-authored case workflows yet
-- Worker stores opaque blobs only (no real bugreport/sysdiagnose analysers)
-- `POST /v1/messages` is an accept stub; message collection in the Flutter app uses the CM01 upload path
-- Architecture roadmap items (Postgres, DPoP, OIDC, KMS, crypto-shred retention UI) are spec-only — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-
----
-
-## Prerequisites
-
-```bash
-export PATH="/opt/homebrew/share/flutter/bin:$PATH"   # avoid broken ~/dev/flutter
-```
-
-Rust stable and Flutter stable.
-
-Configuration uses **CLI flags only** (no `COLLECTEMOI_*` environment variables).
+| Analyst case workflows / parsers / Postgres | Spec / next — see architecture doc |
 
 ---
 
 ## Quick lab (API + worker)
 
 ```bash
-# One-shot process control (builds if needed) — HTTPS by default
+export PATH="/opt/homebrew/share/flutter/bin:$PATH"   # if needed
+
 ./scripts/collectemoictl start
-./scripts/collectemoictl status          # processes, TLS, storage, catalogue
-./scripts/collectemoictl health          # exit 0/1 for scripts
-./scripts/collectemoictl doctor          # local diagnostics
-./scripts/collectemoictl logs -f         # follow api+worker logs
+./scripts/collectemoictl status
+./scripts/collectemoictl health
+./scripts/collectemoictl doctor
+./scripts/collectemoictl logs -f
 # ./scripts/collectemoictl restart --bind 0.0.0.0:8080 --public-url https://192.168.1.10:8080
-# Custom certs (otherwise auto-generated under data/tls/):
 # ./scripts/collectemoictl start --tls-cert ./fullchain.pem --tls-key ./privkey.pem
-# Optional plain HTTP companion (off by default):
-# ./scripts/collectemoictl start --http-bind 127.0.0.1:8081
+# ./scripts/collectemoictl start --http-bind 127.0.0.1:8081   # optional plain HTTP
 # ./scripts/collectemoictl stop
 
-# Forgot admin password (host-local — no old password needed):
+# Forgot admin password (host-local):
 # ./scripts/collectemoictl reset-password
-# ./scripts/collectemoictl reset-password --password 'new-secret' --yes
-# ./scripts/collectemoictl reset-password --keep-mfa --yes   # password only; leave TOTP/YubiKey
-# ./scripts/collectemoictl reset-password --force-setup --yes
+# ./scripts/collectemoictl reset-password --keep-mfa --yes
 ```
 
 Or manually:
@@ -171,194 +460,203 @@ cargo run -p collectemoi-api -- \
 cargo run -p collectemoi-worker -- --data-dir ./data
 ```
 
-**TLS / HTTPS only by default.** If `--tls-cert` / `--tls-key` are omitted, a self-signed cert is written to `data/tls/server.{crt,key}` (SAN: localhost, 127.0.0.1, host from `--public-url`). Pass your own PEMs for production. Plain HTTP is off unless you set `--http-bind` (or `--tls false` for lab-only plaintext).
+**Admin:** [https://127.0.0.1:8080/admin](https://127.0.0.1:8080/admin) (trust or proceed past the self-signed cert under `data/tls/`).
 
-### Docker package and quick VPS deploy
-
-The root `Dockerfile` builds a small runtime image containing both the API and worker. The API listens on HTTPS port 8080 and stores its database, generated TLS certificate, uploads, blobs, and keys under `/data`.
-
-To create a portable image archive locally (Docker Buildx required):
+**Admin TUI:**
 
 ```bash
-./scripts/collectemoictl package --platform linux/amd64
-# Use linux/arm64 for an ARM VPS; optional: --out ./collectemoi.tar.gz --tag collectemoi:try1
+./scripts/collectemoictl tui
 ```
 
-For a quick test deployment, make sure the VPS has Docker installed and your SSH key can log in and run Docker, then run:
+**TLS:** HTTPS by default. Missing certs → auto self-signed in `data/tls/`. Plain HTTP only with `--http-bind` or `--tls false`.
+
+---
+
+## Docker
+
+One image: **API + worker + Flutter/Android toolchain** (admin can generate branded APKs). Data lives in volume `collectemoi-data` → `/data`.
 
 ```bash
+./scripts/collectemoi-docker                 # build collectemoi:local (prefer linux/amd64 on Apple Silicon)
+./scripts/collectemoi-docker up              # https://127.0.0.1:8080/admin  ·  http://127.0.0.1:8081/healthz
+./scripts/collectemoi-docker update --version 1.4.1 -d
+./scripts/collectemoi-docker load dist/collectemoi-1.4.1.tar.gz
+./scripts/collectemoi-docker run             # single container (api+worker)
+./scripts/collectemoi-docker wipe-data --yes # intentional clean slate only
+```
+
+```bash
+cp .env.example .env   # COLLECTEMOI_PUBLIC_URL, OTP webhook, ports…
+```
+
+Image roles: `api` (default), `worker`, `all`. Give the API container ≈8 GB+ RAM for the first Gradle/APK build.
+
+### Package and VPS push
+
+```bash
+./scripts/collectemoictl package --platform linux/amd64 --version 1.4.0
 ./scripts/collectemoictl push deploy@example.com --public-url https://example.com:8080
-# Optional: --ssh-port 2222 --port 8443 --platform linux/arm64
 ```
 
-`push` packages the image, copies it over SSH, loads it on the VPS, and starts `collectemoi-test-api` plus `collectemoi-test-worker`. The API is published on the selected host port (8080 by default); its admin UI is at `/admin`. Use a DNS name or IP in `--public-url` that resolves to the VPS and is reachable by clients. The server creates a self-signed certificate for that URL, so clients will need to trust it for testing. The containers share the persistent Docker volume `collectemoi-test-data`; rerunning `push` replaces these test containers while retaining their state. Remove that volume explicitly with `docker volume rm collectemoi-test-data` when you want to discard the test server data.
+`push` loads the image over SSH and starts test API/worker containers on volume `collectemoi-test-data`. Public binds do **not** seed demo companies / `LAB-*` keys — create them in admin. Flutter trusts self-signed TLS only for loopback; remote labs need a trusted cert (Node has `--insecure` for lab only).
 
-To run the image yourself, mount a persistent volume at `/data` and pass the normal API flags. Override the entrypoint with `/usr/local/bin/collectemoi-worker` to run the worker from the same image.
+---
 
-**Admin console**: [https://127.0.0.1:8080/admin](https://127.0.0.1:8080/admin) — browser warns on the self-signed cert; use Advanced → Proceed (or trust `data/tls/server.crt`).
+## Clients
 
-Clients generate a unique ChaCha20-Poly1305 **noise key** at enroll, exchange it with the server, and wrap CM01 uploads as `CMNK` blobs. Banned device public keys are rejected on enroll and upload complete.
-
-**Email OTP enroll**: `POST /v1/enroll/start` (work email must match a company domain) → 6-digit code (10 min TTL) → `POST /v1/enroll/confirm` with code + device/noise keys. Lab shortcut keys (`LAB-DEMO01` …) skip the mailbox. Admin console lists companies, lab keys, and the enrollment log.
-
-**Persistence**: all metadata/config/audit lives in SQLite at `data/collectemoi.db` (devices, companies, lab keys, uploads, jobs, blobs catalogue, access + enrollment logs). Queries are parameterized; path ids must be UUIDs. Large ciphertext/plaintext files stay under `data/uploads/` and `data/blobs/` (case TLS keys remain under `data/keys/` and `data/tls/`). Legacy JSON/JSONL files are imported once on first open.
-
-**Backup / restore** (zip with `collectemoi.db` + optional keys/blobs):
-
-```bash
-./scripts/collectemoictl export --out ./backup.zip --keys
-./scripts/collectemoictl import ./backup.zip --force --keys
-# Or Admin → Settings → Backup (https://127.0.0.1:8080/admin#settings)
-# API: GET /v1/admin/export?keys=true&blobs=false
-#      POST /v1/admin/import?confirm=true  (multipart field `file`)
-```
-
-### Desktop TypeScript client
-
-```bash
-./scripts/collectemoi-client-ui
-# → listens on http://127.0.0.1:8090/ (does not open a browser; pass --open to launch one)
-# talks to https://127.0.0.1:8080 with --insecure
-
-# Or CLI (lab self-signed):
-cd clients/node && npm install
-npx tsx src/cli.ts enroll --server https://127.0.0.1:8080 --lab-key LAB-DEMO01 --insecure
-npx tsx src/cli.ts enroll --server https://127.0.0.1:8080 --email you@example.com --insecure
-npx tsx src/cli.ts collect --file ~/Desktop/sample.zip --artefact android_bugreport --insecure
-```
-
-See [clients/node/README.md](clients/node/README.md).
-
-### Flutter web / mobile lab
+### Flutter (`app/`)
 
 ```bash
 cd app && flutter run -d chrome   # or a device
-```
-
-1. Enroll with token **`demo`** (set Server URL if needed).  
-2. **Lab file upload** → pick a bugreport ZIP (or any test file).  
-3. Consent → upload.  
-4. Worker decrypts CM01 and stores an opaque blob under `data/blobs/` (no bugreport/sysdiagnose parsers).
-
-### `collectemoi-api` flags
-
-| Flag | Default | Meaning |
-| --- | --- | --- |
-| `--data-dir` | `./data` | Uploads, keys, jobs |
-| `--bind` | `127.0.0.1:8080` | Listen address |
-| `--public-url` | `https://127.0.0.1:8080` | Advertised in enroll / manifest |
-| `--tls` | `true` | HTTPS; auto-generates `<data-dir>/tls/server.{crt,key}` |
-| `--tls-cert` / `--tls-key` | `<data-dir>/tls/server.*` | Custom PEM certificate / private key |
-| `--http-bind` | `off` | Optional plain HTTP companion (`off` = HTTPS only) |
-| `--lab-seal` | `true` | Enable `POST /v1/lab/seal` for Flutter web |
-| `--lab-reveal-otp` | `true` | Include OTP in `/v1/enroll/start` responses (lab) |
-| `--allow-dev-envelope` | `false` | Accept legacy `CMDEV` blobs |
-| `--rate-limit` | `true` | Per-IP rate limits + abuse cool-down |
-| `--max-concurrent` | `256` | Max in-flight HTTP requests |
-| `--request-timeout-secs` | `120` | Per-request timeout (slowloris / hung clients) |
-| `--rate-limit-general` | `180` | General reqs / IP / minute |
-| `--rate-limit-auth` | `20` | Auth reqs / IP / minute |
-| `--rate-limit-enroll` | `30` | Enroll reqs / IP / minute |
-| `--case-pk` / `--case-sk` | `<data-dir>/keys/case.*.hex` | Optional case key files (hex) |
-| `--log` | `collectemoi_api=info` | Tracing filter |
-
-```bash
-cargo run -p collectemoi-api -- --help
-```
-
-### `collectemoi-worker` flags
-
-Decrypts completed uploads into opaque blobs. **Never** runs bugreport/sysdiagnose parsers.
-
-| Flag | Default | Meaning |
-| --- | --- | --- |
-| `--data-dir` | `./data` | Same tree as the API |
-| `--poll-secs` | `2` | Job poll interval |
-| `--workers` | `4` | Max parallel decrypt jobs |
-| `--case-pk` / `--case-sk` | `<data-dir>/keys/case.*.hex` | Optional case key files |
-| `--log` | `collectemoi_worker=info` | Tracing filter |
-
-### Blob API
-
-| Method | Path | Meaning |
-| --- | --- | --- |
-| `GET` | `/v1/admin/blobs?limit=&offset=&case_id=&artefact=` | List blobs (paginated) |
-| `GET` | `/v1/admin/blobs/{id}` | Blob metadata |
-| `GET` | `/v1/admin/blobs/{id}/content` | Download raw bytes (streamed) |
-| `DELETE` | `/v1/admin/blobs/{id}` | Delete blob |
-| `GET` | `/v1/blobs…` | Same list/get/content (lab convenience) |
-| `GET` | `/v1/admin/access-stats` | Aggregated API access stats (by kind / IP / blob) |
-| `GET` | `/v1/admin/access-log` | Recent API access events (`?kind=&remote=&limit=`) |
-| `POST` | `/v1/client/submissions` | Enrolled device submission history (requires an encrypted proof using its registered noise key) |
-
-Uploads are sharded under `data/uploads/<aa>/<bb>/<uuid>/` with per-upload locks so many clients can upload in parallel. API hits are audited to `data/access_log.jsonl` (clients may send `X-Device-Id`).
-
-```bash
-cargo run -p collectemoi-worker -- --help
-```
-
----
-
-## CM01 sealing
-
-- **Native (macOS/Linux desktop, future Android `.so`)**: Dart FFI loads `target/debug/libcollectemoi_envelope.dylib`.
-- **Web / missing dylib**: `POST /v1/lab/seal` (API `--lab-seal true`).
-- Device keys: P-256 from FFI, or PointyCastle on web.
-- Case keys: under `data/keys/case.{pk,sk}.hex` (or `--case-pk` / `--case-sk`).
-
-CLI:
-
-```bash
-cargo run -p collectemoi-cli -- gen-case-key --out /tmp/case
-cargo run -p collectemoi-cli -- gen-device-key --out /tmp/device
-cargo run -p collectemoi-cli -- upload --input file.zip \
-  --server http://127.0.0.1:8080 \
-  --case-id 00000000-0000-4000-8000-000000000001 \
-  --case-pk /tmp/case.pk --device-sk /tmp/device.sk
-```
-
----
-
-## Android / iOS
-
-Lab builds (APK / iOS Simulator) via control script:
-
-```bash
-export PATH="/opt/homebrew/share/flutter/bin:$PATH"
-
-./scripts/collectemoi-app doctor          # toolchain check
-./scripts/collectemoi-app devices
-./scripts/collectemoi-app emulators       # list; --launch <id> to boot one
-
-# Debug APK → dist/mobile (+ data/mobile for admin download)
-./scripts/collectemoi-app apk --install
+./scripts/collectemoi-app doctor
 ./scripts/collectemoi-app apk --server https://192.168.1.10:8080 --install
-
-# iOS Simulator → Runner.app + .zip/.ipa for admin console download
 ./scripts/collectemoi-app ios --simulator
-./scripts/collectemoi-app run --ios       # or --android / --device <id>
-
-./scripts/collectemoi-app open            # reveal dist/mobile in Finder
-# Admin UI → Client apps  (brand · generate · download APK / IPA)
 ```
 
-Or manually:
+1. Enroll (email OTP, lab key, or QR).  
+2. Collect → consent → background upload.  
+3. Worker writes an opaque blob under `data/blobs/`.
 
-```bash
-cd app
-flutter run -d <device>
-```
-
-On the enroll screen, set **Server URL** (e.g. `https://192.168.1.10:8080` on a physical phone), or bake it in with `--server` / `--dart-define=COLLECTEMOI_SERVER_URL=…`.  
-Bind the API accordingly:
+Bake server URL with `--server` / `--dart-define=COLLECTEMOI_SERVER_URL=…`, or set it on the enroll screen. Bind the API for LAN phones:
 
 ```bash
 ./scripts/collectemoictl start --bind 0.0.0.0:8080 --public-url https://192.168.1.10:8080
 ```
 
-- **Android**: share target + Developer Options deep links; client ZIP validation.
-- **iOS**: guide + Files import; App Group on Runner.  
-  Share Extension: see [`app/ios/ShareExtension/README.md`](app/ios/ShareExtension/README.md).
+iOS Share Extension notes: [`app/ios/ShareExtension/README.md`](app/ios/ShareExtension/README.md).
+
+### Node / TypeScript (`clients/node/`)
+
+```bash
+./scripts/collectemoi-client-ui --insecure
+# → http://127.0.0.1:8090/
+
+cd clients/node && npm install
+npx tsx src/cli.ts enroll --server https://127.0.0.1:8080 --lab-key LAB-DEMO01 --insecure
+npx tsx src/cli.ts collect --file ~/Desktop/sample.zip --artefact android_bugreport --insecure
+```
+
+See [clients/node/README.md](clients/node/README.md).
+
+### Rust CLI
+
+```bash
+cargo run -p collectemoi-cli -- gen-case-key --out /tmp/case
+cargo run -p collectemoi-cli -- gen-device-key --out /tmp/device
+cargo run -p collectemoi-cli -- upload --input file.zip \
+  --server https://127.0.0.1:8080 \
+  --case-id 00000000-0000-4000-8000-000000000001 \
+  --case-pk /tmp/case.pk --device-sk /tmp/device.sk
+```
+
+**CM01 sealing:** native FFI (`libcollectemoi_envelope`) when present; otherwise `POST /v1/lab/seal` (disable with `--lab-seal false` outside lab). Case keys: `data/keys/case.{pk,sk}.hex`.
+
+---
+
+## Configuration
+
+Primary knobs are **CLI flags** (and Admin → Settings). A few deploy helpers also accept env (OTP webhook, Docker `.env`).
+
+### `collectemoi-api`
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--data-dir` | `./data` | Uploads, keys, jobs, DB |
+| `--bind` | `127.0.0.1:8080` | Listen address |
+| `--public-url` | `https://127.0.0.1:8080` | Advertised URL |
+| `--tls` | `true` | HTTPS; auto `data/tls/server.{crt,key}` |
+| `--tls-cert` / `--tls-key` | under `data/tls/` | Custom PEMs |
+| `--http-bind` | `off` | Optional plain HTTP companion |
+| `--lab-seal` | `true` | `POST /v1/lab/seal` for web |
+| `--lab-reveal-otp` | `false` | Include OTP in start response (dev only) |
+| `--otp-delivery-webhook-url` | empty | Also `COLLECTEMOI_OTP_WEBHOOK_URL` |
+| `--otp-delivery-webhook-token` | empty | Also `COLLECTEMOI_OTP_WEBHOOK_TOKEN` |
+| `--allow-dev-envelope` | `false` | Accept legacy `CMDEV` |
+| `--rate-limit` | `true` | Per-IP limits + cool-down |
+| `--max-concurrent` | `1024` | In-flight HTTP cap |
+| `--db-pool-size` | `0` (auto) | SQLite connection pool |
+| `--request-timeout-secs` | `300` | Per-request timeout |
+| `--rate-limit-upload` | `3000` | Chunk PUTs / IP / minute |
+| `--rate-limit-device-uploads` | `10` | Fallback quota when a device has no company |
+| `--rate-limit-device-window-secs` | `3600` | Window for the per-device upload quota |
+| `--case-pk` / `--case-sk` | `data/keys/…` | Optional case key paths |
+| `--log` | `collectemoi_api=info` | Tracing filter |
+
+### `collectemoi-worker`
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--data-dir` | `./data` | Same tree as API |
+| `--poll-secs` | `1` | Idle poll interval (busy queue polls ~50 ms) |
+| `--workers` | `0` (auto) | Parallel decrypt jobs (8–32 from CPUs) |
+| `--db-pool-size` | `0` (auto) | SQLite connection pool |
+| `--case-pk` / `--case-sk` | `data/keys/…` | Optional case key paths |
+| `--log` | `collectemoi_worker=info` | Tracing filter |
+
+### Capacity (many devices / parallel uploads)
+
+Thousands of **enrolled** devices are fine (SQLite rows). Thousands **uploading large artefacts at once** need disk I/O and these knobs:
+
+| Concern | What to tune |
+| --- | --- |
+| In-flight HTTP | `--max-concurrent` (default 1024) |
+| SQLite writers | `--db-pool-size` on API **and** worker (WAL + pool; auto ≈ 4× CPUs) |
+| Decrypt backlog | worker `--workers` (auto 8–32); keep API+worker on fast local disk for `data/` |
+| Shared NAT / office Wi‑Fi | `--rate-limit-upload` (chunk PUTs per IP per minute) |
+| One device flooding reports | Company **Uploads / device / hour** (admin); optional per-device **Bypass quota** |
+| Disk | Size `data/uploads` + `data/blobs` for peak concurrent ciphertext + plaintext |
+
+Chunk PUTs update a single SQLite bit (no full-row rewrite / no per-chunk `meta.json`). The worker claims jobs in batches and keeps worker slots filled instead of waiting for a whole batch to finish before the next poll.
+
+Still a **single-node SQLite** design — for multi-region / SaaS-scale catalogue writes, the roadmap is Postgres ([docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
+
+### Useful HTTP surfaces
+
+| Method | Path | Meaning |
+| --- | --- | --- |
+| `GET` | `/healthz` | Liveness |
+| `GET` | `/admin` | Admin console |
+| `POST` | `/v1/enroll/start` · `/confirm` | Enrollment |
+| `POST` | `/v1/uploads` · chunks · complete | Chunked upload |
+| `POST` | `/v1/lab/seal` | Lab-only CM01 seal |
+| `GET` | `/v1/admin/blobs…` | List / meta / content / delete |
+| `GET` | `/v1/admin/access-stats` · `access-log` | API audit |
+| `POST` | `/v1/client/submissions` | Device submission history (noise proof) |
+
+**Backup:**
+
+```bash
+./scripts/collectemoictl export --out ./backup.zip --keys
+./scripts/collectemoictl import ./backup.zip --force --keys
+# or Admin → Settings → Backup
+```
+
+**Process ctl:** `start` / `stop` / `restart` / `status` / `health` / `doctor` / `logs` / `open` / `tui` / `version` / `reset-password` / `export` / `import` / `package` / `push`.
+
+---
+
+## Layout
+
+```text
+crates/collectemoi-envelope/   # CM01 + C FFI
+crates/collectemoi-db/         # SQLite catalogue
+crates/collectemoi-api/        # enroll, uploads, lab seal, /admin
+crates/collectemoi-worker/     # decrypt → opaque blobs
+crates/collectemoi-cli/
+crates/collectemoi-tui/
+clients/node/
+scripts/collectemoictl
+scripts/collectemoi-docker
+scripts/collectemoi-client-ui
+scripts/collectemoi-app
+app/                           # Flutter
+docs/ARCHITECTURE.md
+data/collectemoi.db
+data/keys/  data/tls/  data/uploads/  data/blobs/
+data/branding/                 # per-company tenant bundles
+data/mobile/                   # generated APK/IPA
+data/run/                      # ctl PID + logs
+```
 
 ---
 
@@ -366,7 +664,6 @@ Bind the API accordingly:
 
 ```bash
 cargo test --workspace
-# Regenerate envelope golden vectors (destructive):
 cargo test -p collectemoi-envelope regenerate_golden_envelope -- --ignored
 
 cd app && flutter test && flutter analyze
@@ -374,23 +671,11 @@ cd app && flutter test && flutter analyze
 
 ---
 
-## Layout
+## Lab limits (intentional)
 
-```text
-crates/collectemoi-envelope/   # CM01 + C FFI (cdylib)
-crates/collectemoi-db/         # SQLite catalogue (parameterized queries)
-crates/collectemoi-api/        # enroll, uploads, lab seal, admin console
-crates/collectemoi-worker/     # decrypt → opaque blob store (no parsers)
-crates/collectemoi-cli/
-clients/node/                  # TypeScript desktop client + UI
-scripts/collectemoictl         # start|stop|restart|status (API + worker)
-scripts/collectemoi-client-ui  # start desktop client UI
-scripts/collectemoi-app        # Flutter Android APK / iOS lab builds
-app/                           # Flutter (android, ios, web)
-data/collectemoi.db            # SQLite: devices, config, uploads, jobs, blobs, audits
-data/keys/                     # case keypair (gitignored)
-data/tls/                      # auto-generated or custom TLS PEMs
-data/uploads/                  # chunked ciphertext staging (sharded)
-data/blobs/                    # opaque decrypted artefacts (bytes on disk)
-data/run/                      # ctl PID + logs
-```
+- Open collection requests are still demo-oriented — not full analyst-authored case workflows  
+- Worker stores opaque blobs only (no real bugreport/sysdiagnose analysers)  
+- `POST /v1/messages` is a stub; the Flutter message collector uses the CM01 upload path  
+- App-layer rate limits are not a substitute for edge DDoS protection  
+- Single-node SQLite catalogue (pooled WAL) — not multi-writer Postgres yet  
+- Roadmap (Postgres, DPoP, OIDC, KMS, crypto-shred UI): [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)

@@ -57,6 +57,33 @@
       color-scheme: light;
     }
 
+    /* Flat, system-font lab theme — minimal chrome */
+    body[data-theme="simple"] {
+      --bg: #f7f7f7;
+      --bg-elev: #ffffff;
+      --bg-panel: #ffffff;
+      --bg-hover: #efefef;
+      --ink: #1a1a1a;
+      --ink-dim: #444444;
+      --ink-faint: #6b6b6b;
+      --line: #d4d4d4;
+      --line-strong: #b0b0b0;
+      --accent: #1a1a1a;
+      --accent-dim: #000000;
+      --accent-soft: rgba(0, 0, 0, 0.06);
+      --warn: #8a5a00;
+      --warn-soft: rgba(138, 90, 0, 0.1);
+      --ok: #1b6b3a;
+      --ok-soft: rgba(27, 107, 58, 0.1);
+      --bad: #a32020;
+      --bad-soft: rgba(163, 32, 32, 0.1);
+      --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --radius: 4px;
+      --shadow: none;
+      color-scheme: light;
+    }
+
     * { box-sizing: border-box; }
     html, body { height: 100%; }
     body {
@@ -674,7 +701,7 @@
 
     .kpi-row {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 0.75rem;
       margin-bottom: 1rem;
     }
@@ -711,7 +738,7 @@
     }
     .kpi .kpi-value {
       font-family: var(--mono);
-      font-size: 1.85rem;
+      font-size: clamp(1.05rem, 1.6vw, 1.85rem);
       font-weight: 600;
       letter-spacing: -0.04em;
       line-height: 1.1;
@@ -748,6 +775,151 @@
       background: linear-gradient(90deg, var(--accent-dim), var(--accent));
       border-radius: inherit;
       transition: width 0.35s ease;
+    }
+    .dash-net {
+      margin-bottom: 1rem;
+      padding: 1rem 1.15rem 1.1rem;
+    }
+    .dash-net-body {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 1rem;
+      align-items: stretch;
+    }
+    .dash-net-chart {
+      position: relative;
+      min-height: 120px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--accent) 6%, transparent), transparent 55%),
+        var(--bg);
+      overflow: hidden;
+    }
+    body[data-theme="simple"] .dash-net-chart {
+      background: #fafafa;
+      border-radius: var(--radius);
+    }
+    .dash-net-chart svg {
+      display: block;
+      width: 100%;
+      height: 120px;
+    }
+    .dash-net-chart .grid-line {
+      stroke: var(--line);
+      stroke-width: 1;
+      stroke-dasharray: 3 4;
+      opacity: 0.7;
+    }
+    .dash-net-chart .area-rx {
+      fill: color-mix(in srgb, var(--accent) 22%, transparent);
+    }
+    .dash-net-chart .line-rx {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 2;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+    }
+    .dash-net-chart .line-tx {
+      fill: none;
+      stroke: var(--warn);
+      stroke-width: 2;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+      stroke-dasharray: 5 3;
+    }
+    .dash-net-stats {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 0.65rem;
+      min-width: 9.5rem;
+    }
+    .dash-net-stat { display: grid; gap: 0.1rem; }
+    .dash-net-stat .k {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--ink-faint);
+      font-weight: 600;
+    }
+    .dash-net-stat .v {
+      font-family: var(--mono);
+      font-size: 1.05rem;
+      font-weight: 650;
+      color: var(--ink);
+    }
+    .dash-net-stat .v.rx { color: var(--accent); }
+    .dash-net-stat .v.tx { color: var(--warn); }
+    .dash-net-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 0.55rem;
+      font-size: 0.72rem;
+      color: var(--ink-faint);
+      font-family: var(--mono);
+    }
+    .dash-net-legend i {
+      display: inline-block;
+      width: 0.85rem;
+      height: 3px;
+      border-radius: 2px;
+      margin-right: 0.3rem;
+      vertical-align: middle;
+    }
+    .dash-net-legend .rx i { background: var(--accent); }
+    .dash-net-legend .tx i {
+      background: transparent;
+      border-top: 2px dashed var(--warn);
+      height: 0;
+      margin-top: 0.15rem;
+    }
+    .dash-activity .line-enroll {
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 2.25;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+    }
+    .dash-activity .line-submit {
+      fill: none;
+      stroke: var(--ok);
+      stroke-width: 2.25;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+    }
+    .dash-activity .line-download {
+      fill: none;
+      stroke: var(--warn);
+      stroke-width: 2.25;
+      stroke-dasharray: 5 3;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+    }
+    .dash-activity .area-enroll {
+      fill: color-mix(in srgb, var(--accent) 14%, transparent);
+    }
+    .dash-net-stat .v.enroll { color: var(--accent); }
+    .dash-net-stat .v.submit { color: var(--ok); }
+    .dash-net-stat .v.download { color: var(--warn); }
+    .dash-net-legend .enroll i { background: var(--accent); }
+    .dash-net-legend .submit i { background: var(--ok); }
+    .dash-net-legend .download i {
+      background: transparent;
+      border-top: 2px dashed var(--warn);
+      height: 0;
+      margin-top: 0.15rem;
+    }
+    @media (max-width: 720px) {
+      .dash-net-body { grid-template-columns: 1fr; }
+      .dash-net-stats {
+        flex-direction: row;
+        flex-wrap: wrap;
+        min-width: 0;
+        gap: 1rem;
+      }
     }
 
     .dash-mini {
@@ -839,20 +1011,69 @@
       text-overflow: ellipsis;
       min-width: 0;
     }
+    .log-ip, .access-ip {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--ink);
+      background: color-mix(in srgb, var(--accent, #3b82f6) 14%, transparent);
+      border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 28%, transparent);
+      border-radius: 6px;
+      padding: 0.08rem 0.4rem;
+      margin-right: 0.35rem;
+      vertical-align: baseline;
+      white-space: nowrap;
+    }
+    .log-device, .access-device {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      color: var(--ink);
+      background: color-mix(in srgb, var(--ok, #22c55e) 14%, transparent);
+      border: 1px solid color-mix(in srgb, var(--ok, #22c55e) 28%, transparent);
+      border-radius: 6px;
+      padding: 0.08rem 0.4rem;
+      margin-right: 0.35rem;
+      vertical-align: baseline;
+      white-space: nowrap;
+      max-width: 16rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .log-line .log-ip,
+    .log-line .log-device { margin-right: 0.45rem; }
+    .expand-remote .access-device {
+      display: block;
+      margin: 0.15rem 0 0;
+      max-width: 100%;
+      font-weight: 500;
+    }
+    .expand-actor {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+    }
+    .expand-actor .pill { font-size: 0.68rem; }
     .expand-summary.access-row,
     .expand-list-head.access-head {
-      grid-template-columns: 18px minmax(0, 1.6fr) minmax(6.5rem, 0.7fr) 4.2rem 3.6rem minmax(5.5rem, auto);
-      column-gap: 0.65rem;
+      grid-template-columns: 18px minmax(0, 1.5fr) minmax(5.5rem, 0.55fr) minmax(6rem, 0.65fr) 4.2rem 3.4rem minmax(5.5rem, auto);
+      column-gap: 0.55rem;
     }
-    .expand-list-head.access-head span:nth-child(4),
-    .expand-list-head.access-head span:nth-child(5) { text-align: center; }
-    .expand-list-head.access-head span:nth-child(6) { text-align: right; }
+    .expand-list-head.access-head span:nth-child(5),
+    .expand-list-head.access-head span:nth-child(6) { text-align: center; }
+    .expand-list-head.access-head span:nth-child(7) { text-align: right; }
     @media (max-width: 900px) {
       .expand-summary.access-row {
         grid-template-columns: 18px 1fr auto;
         grid-template-rows: auto auto;
       }
-      .expand-summary.access-row .expand-remote,
+      /* Keep remote IP visible on narrow screens via meta; hide only actor/side. */
+      .expand-summary.access-row .expand-remote { display: none; }
+      .expand-summary.access-row .expand-actor,
       .expand-summary.access-row .expand-side { display: none; }
       .expand-summary.access-row .expand-status { grid-column: 3; grid-row: 1; }
       .expand-summary.access-row .expand-actions { grid-column: 2 / 4; grid-row: 2; justify-content: flex-start; }
@@ -1149,6 +1370,91 @@
       word-break: break-word;
     }
     .preview-phone-screen .pv-foot:empty { display: none; }
+    .preview-phone-screen .pv-otp-mail {
+      margin-top: 0.75rem;
+      padding: 0.55rem 0.65rem;
+      border-radius: 10px;
+      border: 1px solid color-mix(in srgb, var(--pv-primary) 28%, #d7ddd9);
+      background: color-mix(in srgb, var(--pv-primary-container) 55%, #fff);
+      text-align: left;
+    }
+    .preview-phone-screen .pv-otp-mail-label {
+      margin: 0 0 0.25rem;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #5f6b65;
+    }
+    .preview-phone-screen .pv-otp-mail-subject {
+      margin: 0;
+      font-size: 0.74rem;
+      font-weight: 650;
+      color: #1a2420;
+      line-height: 1.3;
+      word-break: break-word;
+    }
+    .preview-phone-screen .pv-otp-mail-body {
+      margin: 0.3rem 0 0;
+      font-size: 0.68rem;
+      color: #3d4742;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 5.5rem;
+      overflow: auto;
+    }
+    .preview-phone-screen .pv-notif-card {
+      display: grid;
+      gap: 0.15rem;
+      padding: 0.55rem 0.65rem;
+      border-radius: 10px;
+      border: 1px solid #d7ddd9;
+      background: #fff;
+      margin-bottom: 0.45rem;
+    }
+    .preview-phone-screen .pv-notif-card strong {
+      font-size: 0.76rem;
+      color: #1a2420;
+    }
+    .preview-phone-screen .pv-notif-card span {
+      font-size: 0.68rem;
+      color: #5f6b65;
+      line-height: 1.35;
+    }
+    .preview-phone-screen .pv-notif-card.ok {
+      border-color: color-mix(in srgb, var(--pv-primary) 35%, #d7ddd9);
+      background: color-mix(in srgb, var(--pv-primary-container) 45%, #fff);
+    }
+    .preview-phone-screen .pv-notif-card.bad {
+      border-color: #f0c2c2;
+      background: #fff5f5;
+    }
+    .locale-editor-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin: 0.65rem 0 0.35rem;
+    }
+    .locale-editor-bar .locale-tab {
+      border: 1px solid var(--line);
+      background: var(--bg-elev);
+      color: var(--ink);
+      border-radius: 999px;
+      padding: 0.28rem 0.7rem;
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+    .locale-editor-bar .locale-tab.active {
+      border-color: var(--accent);
+      background: color-mix(in srgb, var(--accent-soft) 70%, transparent);
+      color: var(--accent);
+      font-weight: 650;
+    }
+    .locale-editor-bar .locale-tab:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
     .preview-meta-row {
       display: flex;
       flex-wrap: wrap;
@@ -1765,6 +2071,88 @@
       font-size: 0.85rem;
     }
     .hint-text .mono { color: var(--accent); }
+    .msg-preview-card .msg-preview-head {
+      font-size: 0.95rem;
+      margin-bottom: 0.35rem;
+    }
+    .msg-preview-card .msg-preview-body-text {
+      margin: 0.5rem 0 0;
+      padding: 0.75rem 0.85rem;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      line-height: 1.45;
+      max-height: 18rem;
+      overflow: auto;
+    }
+    .msg-preview-card .msg-preview-urls {
+      margin: 0.45rem 0 0;
+      padding-left: 1.1rem;
+      font-size: 0.78rem;
+    }
+    .msg-preview-images-title {
+      margin: 0.85rem 0 0.35rem;
+      font-size: 0.78rem;
+      font-weight: 650;
+      letter-spacing: 0.02em;
+      color: var(--ink-dim);
+      text-transform: uppercase;
+    }
+    .msg-preview-images {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 0.75rem;
+      margin-top: 0.35rem;
+    }
+    .msg-preview-images figure {
+      margin: 0;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .msg-preview-images img {
+      display: block;
+      width: 100%;
+      max-height: 280px;
+      height: auto;
+      object-fit: contain;
+      background: #0b1220;
+      cursor: zoom-in;
+    }
+    .msg-preview-images figcaption {
+      margin: 0;
+      padding: 0.4rem 0.55rem;
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--ink-faint);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .msg-preview-lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 80;
+      background: rgba(8, 12, 20, 0.82);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      cursor: zoom-out;
+    }
+    .msg-preview-lightbox img {
+      max-width: min(96vw, 1100px);
+      max-height: 90vh;
+      object-fit: contain;
+      border-radius: 10px;
+      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+      background: #fff;
+    }
 
     details.analysis {
       border: 1px solid var(--line);
@@ -2167,7 +2555,8 @@
       font-size: 0.78rem;
       line-height: 1.55;
       padding: 0.35rem 0;
-      background: #0b100e;
+      background: var(--bg);
+      color: var(--ink);
     }
     .log-line {
       display: grid;
@@ -2176,7 +2565,7 @@
       padding: 0.18rem 0.9rem;
       border-left: 2px solid transparent;
     }
-    .log-line:hover { background: rgba(46, 196, 160, 0.06); }
+    .log-line:hover { background: var(--accent-soft); }
     .log-line .ts { color: var(--ink-faint); white-space: nowrap; }
     .log-line .src {
       color: var(--accent);
@@ -2186,7 +2575,8 @@
       padding-top: 0.12rem;
     }
     .log-line .src.src-access { color: var(--warn); }
-    .log-line .src.src-worker { color: #7eb8ff; }
+    .log-line .src.src-worker { color: color-mix(in srgb, #4d8fd9 70%, var(--ink)); }
+    body[data-theme="dark"] .log-line .src.src-worker { color: #7eb8ff; }
     .log-line .lvl {
       font-weight: 600;
       font-size: 0.68rem;
@@ -2197,9 +2587,9 @@
     .log-line .msg .tgt { color: var(--ink-faint); margin-right: 0.35rem; }
     .log-line.lvl-INFO { border-left-color: color-mix(in srgb, var(--accent) 50%, transparent); }
     .log-line.lvl-INFO .lvl { color: var(--accent); }
-    .log-line.lvl-WARN { border-left-color: var(--warn); background: rgba(224, 160, 74, 0.04); }
+    .log-line.lvl-WARN { border-left-color: var(--warn); background: var(--warn-soft); }
     .log-line.lvl-WARN .lvl { color: var(--warn); }
-    .log-line.lvl-ERROR { border-left-color: var(--bad); background: rgba(224, 106, 106, 0.06); }
+    .log-line.lvl-ERROR { border-left-color: var(--bad); background: var(--bad-soft); }
     .log-line.lvl-ERROR .lvl { color: var(--bad); }
     .log-line.lvl-DEBUG .lvl,
     .log-line.lvl-TRACE .lvl { color: var(--ink-faint); }
@@ -2240,10 +2630,11 @@
     .log-view.dense .log-line { padding: 0.08rem 0.9rem; }
     .log-view.nowrap .msg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .log-line .msg mark {
-      background: rgba(224, 160, 74, 0.35);
+      background: var(--warn-soft);
       color: inherit;
       border-radius: 2px;
       padding: 0 0.1rem;
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 35%, transparent);
     }
     .log-stats { display: inline-flex; gap: 0.65rem; margin-left: 0.5rem; }
     .log-stats .e { color: var(--bad); }
@@ -2302,6 +2693,106 @@
     body[data-theme="light"] .main { background: var(--bg); }
     body[data-theme="light"] .kpi { background: var(--bg-panel); }
     body[data-theme="light"] .topbar { box-shadow: 0 1px 0 var(--line); }
+
+    body[data-theme="simple"] .topbar {
+      background: #fff;
+      box-shadow: none;
+      border-bottom: 1px solid var(--line);
+    }
+    body[data-theme="simple"] .topbar,
+    body[data-theme="simple"] .sidebar,
+    body[data-theme="simple"] .main {
+      background: var(--bg-elev);
+    }
+    body[data-theme="simple"] .main { background: var(--bg); }
+    body[data-theme="simple"] .brand-mark {
+      background: #1a1a1a;
+      color: #fff;
+      border-radius: 3px;
+      box-shadow: none;
+    }
+    body[data-theme="simple"] .card,
+    body[data-theme="simple"] .stat,
+    body[data-theme="simple"] .kpi,
+    body[data-theme="simple"] .svc-sheet,
+    body[data-theme="simple"] .auth-card {
+      box-shadow: none;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #fff;
+    }
+    body[data-theme="simple"] .nav-btn {
+      border-radius: var(--radius);
+    }
+    body[data-theme="simple"] .nav-btn.active {
+      background: var(--bg-hover);
+      box-shadow: inset 3px 0 0 #1a1a1a;
+      color: var(--ink);
+    }
+    body[data-theme="simple"] .live {
+      border-radius: var(--radius);
+      background: #fff;
+    }
+    body[data-theme="simple"] .live .dot {
+      box-shadow: none;
+      animation: none;
+    }
+    body[data-theme="simple"] button,
+    body[data-theme="simple"] .btn,
+    body[data-theme="simple"] .search,
+    body[data-theme="simple"] input,
+    body[data-theme="simple"] select,
+    body[data-theme="simple"] textarea,
+    body[data-theme="simple"] .pill,
+    body[data-theme="simple"] .table-wrap,
+    body[data-theme="simple"] .theme-control select,
+    body[data-theme="simple"] button.status-ico {
+      border-radius: var(--radius);
+      box-shadow: none;
+    }
+    body[data-theme="simple"] button.primary {
+      background: #1a1a1a;
+      color: #fff;
+      border-color: #1a1a1a;
+    }
+    body[data-theme="simple"] button.primary:hover {
+      background: #333;
+      filter: none;
+    }
+    body[data-theme="simple"] .search:focus,
+    body[data-theme="simple"] input:focus,
+    body[data-theme="simple"] select:focus,
+    body[data-theme="simple"] textarea:focus {
+      box-shadow: none;
+      border-color: #1a1a1a;
+    }
+    body[data-theme="simple"] .pill.ok,
+    body[data-theme="simple"] .pill.accent,
+    body[data-theme="simple"] .pill.warn,
+    body[data-theme="simple"] .pill.bad,
+    body[data-theme="simple"] .pill.company {
+      background: #f0f0f0;
+      border: 1px solid var(--line);
+      color: var(--ink);
+    }
+    body[data-theme="simple"] .pill.ok { border-color: var(--ok); color: var(--ok); }
+    body[data-theme="simple"] .pill.warn { border-color: var(--warn); color: var(--warn); }
+    body[data-theme="simple"] .pill.bad { border-color: var(--bad); color: var(--bad); }
+    body[data-theme="simple"] .log-ip,
+    body[data-theme="simple"] .access-ip,
+    body[data-theme="simple"] .log-device,
+    body[data-theme="simple"] .access-device {
+      background: #f0f0f0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      font-weight: 500;
+    }
+    body[data-theme="simple"] .expand-row,
+    body[data-theme="simple"] .expand-summary {
+      border-radius: var(--radius);
+    }
+    body[data-theme="simple"] button.status-ico:hover { transform: none; }
+
     .brand-mark { border-radius: 8px; }
     .sidebar { gap: 0.3rem; }
     .nav-label { padding-top: 0.85rem; }
@@ -2366,8 +2857,8 @@
         <h2>Secure this console</h2>
         <p class="lead">Set a password for the <span class="mono">admin</span> account. TOTP and YubiKey are optional — enable them later in Settings → Security.</p>
         <form id="setup-form">
-          <label>Password <input name="password" type="password" autocomplete="new-password" required /></label>
-          <label>Confirm password <input name="password2" type="password" autocomplete="new-password" required /></label>
+          <label>Password <input name="password" type="password" autocomplete="new-password" maxlength="128" required /></label>
+          <label>Confirm password <input name="password2" type="password" autocomplete="new-password" maxlength="128" required /></label>
           <p class="err" id="setup-err"></p>
           <div class="actions"><button type="submit" class="primary">Create admin</button></div>
         </form>
@@ -2414,6 +2905,7 @@
           <select id="theme-select" aria-label="Choose console theme">
             <option value="dark">Dark</option>
             <option value="light">Light</option>
+            <option value="simple">Simple</option>
           </select>
         </label>
         <button type="button" class="ghost" id="btn-logout" hidden>Sign out</button>
@@ -2498,6 +2990,20 @@
           </div>
         </div>
         <div class="dash-health" id="dash-health" aria-live="polite"></div>
+        <div class="card dash-net" id="dash-network" aria-label="Network throughput">
+          <div class="card-title">
+            <h3>Network</h3>
+            <span class="hint" id="dash-net-hint">live RX / TX</span>
+          </div>
+          <div class="dash-net-body" id="dash-net-body"></div>
+        </div>
+        <div class="card dash-net dash-activity" id="dash-activity" aria-label="Lab activity">
+          <div class="card-title">
+            <h3>Activity</h3>
+            <span class="hint" id="dash-activity-hint">enrollments · submissions · downloads</span>
+          </div>
+          <div class="dash-net-body" id="dash-activity-body"></div>
+        </div>
         <div class="kpi-row" id="dash-kpis"></div>
         <div class="dash-mini stats" id="dash-mini"></div>
         <div class="grid-2" style="margin-bottom:1rem">
@@ -2632,6 +3138,7 @@
             <select id="access-kind" class="search" style="min-width:160px;cursor:pointer" title="Request kind" aria-label="Filter by kind">
               <option value="">All kinds</option>
               <option value="blob_download">Blob download</option>
+              <option value="blob_preview">Blob preview</option>
               <option value="blob_get">Blob meta</option>
               <option value="blob_list">Blob list</option>
               <option value="blob_delete">Blob delete</option>
@@ -2656,6 +3163,11 @@
               <option value="4xx">4xx client</option>
               <option value="5xx">5xx server</option>
               <option value="err">Any error</option>
+            </select>
+            <select id="access-actor" class="search" style="min-width:120px;cursor:pointer" title="Admin or client" aria-label="Filter by actor">
+              <option value="">All actors</option>
+              <option value="admin">Admin</option>
+              <option value="client">Client</option>
             </select>
             <select id="access-remote" class="search" style="min-width:150px;cursor:pointer" title="Remote IP" aria-label="Filter by remote">
               <option value="">All remotes</option>
@@ -2728,6 +3240,12 @@
             <label style="grid-column:1 / -1">Domains (comma-separated)
               <input name="domains" type="text" required placeholder="acme.com, acme.co" />
             </label>
+            <label>Max devices / email
+              <input name="max_devices_per_email" type="number" min="0" max="1000" value="1" title="1 = one device per email; 0 = unlimited" />
+            </label>
+            <label>Uploads / device / hour
+              <input name="device_uploads_per_hour" type="number" min="0" max="10000" value="10" title="New upload sessions per device per hour; 0 = unlimited" />
+            </label>
             <label>Label color
               <span class="seed-color-wrap">
                 <input name="color_picker" type="color" value="#3B82F6" title="Company label color" />
@@ -2738,7 +3256,7 @@
               <button class="primary" type="submit">Create company</button>
             </div>
           </form>
-          <p class="meta-line">Enrollment emails must match one of these domains. Lab demo domains often include <span class="mono">example.com</span>.</p>
+          <p class="meta-line">Enrollment emails must match one of these domains. Default is 1 device per email (0 = unlimited). Upload quota is enforced on the server (0 = unlimited); individual devices can bypass it.</p>
         </div>
 
         <div id="companies-list-view">
@@ -2795,13 +3313,19 @@
                 <label style="grid-column:1 / -1">Domains (comma-separated)
                   <input name="domains" type="text" required />
                 </label>
+                <label>Max devices / email
+                  <input name="max_devices_per_email" type="number" min="0" max="1000" value="1" title="1 = one device per email; 0 = unlimited" />
+                </label>
+                <label>Uploads / device / hour
+                  <input name="device_uploads_per_hour" type="number" min="0" max="10000" value="10" title="New upload sessions per device per hour; 0 = unlimited" />
+                </label>
                 <label>Label color
                   <span class="seed-color-wrap">
                     <input name="color_picker" type="color" value="#2EC4A0" title="Company label color" />
                     <input name="color" type="text" maxlength="7" placeholder="#2EC4A0" />
                   </span>
                 </label>
-                <p class="meta-line" style="grid-column:1 / -1;margin:0">Used for company pills across Devices, Blobs, Pipeline, and filters. Preview: <span id="company-color-preview" class="pill company">Company</span></p>
+                <p class="meta-line" style="grid-column:1 / -1;margin:0">1 device per email by default (unique association). Upload quota is server-side per device (0 = unlimited; devices can bypass). Preview: <span id="company-color-preview" class="pill company">Company</span></p>
                 <div class="split-actions">
                   <button class="primary" type="submit">Save changes</button>
                 </div>
@@ -2876,7 +3400,7 @@
 
           <div class="subpanel" data-csubpanel="audit">
             <div class="card">
-              <div class="card-title"><h3>Recent enrollment</h3><span class="hint">last 50 for this company</span></div>
+              <div class="card-title"><h3>Company audit</h3><span class="hint">enrollment + uploads · last 100</span></div>
               <div id="company-enroll-log"></div>
             </div>
           </div>
@@ -3031,6 +3555,20 @@
                     <label>Privacy policy URL
                       <input name="privacy_policy_url" type="url" />
                     </label>
+                    <label style="grid-column:1 / -1">App languages
+                      <div class="collector-checks" id="locale-checks">
+                        <label><input type="checkbox" name="loc_en" value="en" checked disabled /> English (base)</label>
+                        <label><input type="checkbox" name="loc_fr" value="fr" checked /> Français</label>
+                        <label><input type="checkbox" name="loc_es" value="es" checked /> Español</label>
+                      </div>
+                    </label>
+                    <label>Default language
+                      <select name="default_locale">
+                        <option value="en">English</option>
+                        <option value="fr">Français</option>
+                        <option value="es">Español</option>
+                      </select>
+                    </label>
                     <label style="grid-column:1 / -1">Enabled collectors
                       <div class="collector-checks">
                         <label><input type="checkbox" name="col_android" value="android_bugreport" checked /> Android bugreport</label>
@@ -3140,6 +3678,12 @@
                     <strong id="screen-copy-title">Enroll copy</strong>
                     <span class="hint">edits apply to the selected preview screen</span>
                   </div>
+                  <div class="locale-editor-bar" id="locale-editor-bar" role="tablist" aria-label="Copy language">
+                    <button type="button" class="locale-tab active" data-branding-locale="en" role="tab" aria-selected="true">English (base)</button>
+                    <button type="button" class="locale-tab" data-branding-locale="fr" role="tab" aria-selected="false">Français</button>
+                    <button type="button" class="locale-tab" data-branding-locale="es" role="tab" aria-selected="false">Español</button>
+                  </div>
+                  <p class="meta-line" id="locale-editor-hint">Base English is the source. Other languages override or fall back to the built-in dictionary.</p>
 
                   <div class="screen-fields active" data-screen-fields="enroll">
                     <div class="row">
@@ -3149,6 +3693,13 @@
                       <label style="grid-column:1 / -1">Enroll intro text
                         <textarea name="enroll_lead" rows="3" maxlength="400" placeholder="Enter your work email…"></textarea>
                       </label>
+                      <label style="grid-column:1 / -1">OTP notification subject
+                        <input name="otp_notification_subject" type="text" maxlength="160" placeholder="{display_name}: your verification code" />
+                      </label>
+                      <label style="grid-column:1 / -1">OTP notification message
+                        <textarea name="otp_notification_body" rows="5" maxlength="2000" placeholder="Your verification code for {company_name} is {code}…"></textarea>
+                      </label>
+                      <p class="meta-line" style="grid-column:1 / -1">Placeholders: <code>{code}</code>, <code>{company_name}</code>, <code>{display_name}</code>, <code>{email}</code>, <code>{expires_in_mins}</code>, <code>{expires_in_secs}</code>. Sent to the OTP delivery webhook as <code>subject</code> / <code>body</code>.</p>
                     </div>
                   </div>
 
@@ -3269,6 +3820,33 @@
                     </div>
                   </div>
 
+                  <div class="screen-fields" data-screen-fields="notifications" hidden>
+                    <div class="row">
+                      <label>Encrypting title
+                        <input name="notif_encrypting_title" type="text" maxlength="80" placeholder="Encrypting…" />
+                      </label>
+                      <label>Uploading title
+                        <input name="notif_uploading_title" type="text" maxlength="80" placeholder="Uploading…" />
+                      </label>
+                      <label style="grid-column:1 / -1">Uploading progress title
+                        <input name="notif_uploading_progress_title" type="text" maxlength="80" placeholder="Uploading… {pct}%" />
+                      </label>
+                      <label>Complete title
+                        <input name="notif_complete_title" type="text" maxlength="80" placeholder="Upload complete" />
+                      </label>
+                      <label>Failed title
+                        <input name="notif_failed_title" type="text" maxlength="80" placeholder="Upload failed" />
+                      </label>
+                      <label style="grid-column:1 / -1">Complete body
+                        <input name="notif_complete_body" type="text" maxlength="200" placeholder="{artefact} was sent to the lab." />
+                      </label>
+                      <label style="grid-column:1 / -1">Failed body
+                        <input name="notif_failed_body" type="text" maxlength="200" placeholder="{artefact} could not be sent." />
+                      </label>
+                      <p class="meta-line" style="grid-column:1 / -1">Shown as Android/iOS system notifications during artefact upload. Placeholders: <code>{pct}</code>, <code>{artefact}</code>.</p>
+                    </div>
+                  </div>
+
                   <div class="screen-fields" data-screen-fields="icon" hidden>
                     <p class="meta-line">Launcher icon uses the display name and uploaded icon from General settings.</p>
                   </div>
@@ -3290,6 +3868,7 @@
                       <option value="bugreport">Android bugreport</option>
                       <option value="sysdiagnose">iOS sysdiagnose</option>
                       <option value="message">Suspicious message</option>
+                      <option value="notifications">Upload notifications</option>
                       <option value="icon">Launcher icon</option>
                     </select>
                   </label>
@@ -3303,6 +3882,7 @@
                       <button type="button" data-screen="bugreport" role="tab" aria-selected="false">Bugreport</button>
                       <button type="button" data-screen="sysdiagnose" role="tab" aria-selected="false">Sysdiagnose</button>
                       <button type="button" data-screen="message" role="tab" aria-selected="false">Message</button>
+                      <button type="button" data-screen="notifications" role="tab" aria-selected="false">Notifications</button>
                       <button type="button" data-screen="icon" role="tab" aria-selected="false">Icon</button>
                     </nav>
                     <div class="preview-phone" id="branding-phone">
@@ -3312,7 +3892,7 @@
                           <img class="pv-logo" id="pv-logo" alt="" hidden />
                           <h3 class="pv-title" id="pv-title">CollecteMoi</h3>
                           <p class="pv-tagline" id="pv-tagline">Secure artefact collection</p>
-                          <p class="pv-lead" id="pv-lead">Enter your work email to receive a one-time code, or use a lab key for local testing.</p>
+                          <p class="pv-lead" id="pv-lead">Enter your work email to receive a one-time verification code.</p>
                           <div class="pv-fields">
                             <div class="pv-field"><span>Server URL</span><strong id="pv-server">https://127.0.0.1:8080</strong></div>
                             <div class="pv-field"><span>Work email</span><strong>you@example.com</strong></div>
@@ -3321,6 +3901,11 @@
                             <div class="pv-field"><span>Verification code</span><strong>••••••</strong></div>
                           </div>
                           <div class="pv-btn-filled">Confirm &amp; enroll</div>
+                          <div class="pv-otp-mail" id="pv-otp-mail" aria-label="OTP notification preview">
+                            <p class="pv-otp-mail-label">Notification sent</p>
+                            <p class="pv-otp-mail-subject" id="pv-otp-subject">CollecteMoi: your verification code</p>
+                            <p class="pv-otp-mail-body" id="pv-otp-body">Your verification code for Acme is 123456.</p>
+                          </div>
                           <p class="pv-foot" id="pv-foot"></p>
                         </div>
                         <div class="pv-screen" data-screen="home">
@@ -3375,6 +3960,26 @@
                           </div>
                           <div class="pv-btn-filled" id="pv-message-button">Continue to consent</div>
                         </div>
+                        <div class="pv-screen" data-screen="notifications">
+                          <div class="pv-appbar"><span>Notifications</span></div>
+                          <p class="pv-muted" style="margin-bottom:0.55rem">System notifications during upload</p>
+                          <div class="pv-notif-card">
+                            <strong id="pv-notif-encrypting">Encrypting…</strong>
+                            <span>Suspicious message</span>
+                          </div>
+                          <div class="pv-notif-card">
+                            <strong id="pv-notif-uploading">Uploading… 42%</strong>
+                            <span>Suspicious message</span>
+                          </div>
+                          <div class="pv-notif-card ok">
+                            <strong id="pv-notif-complete-title">Upload complete</strong>
+                            <span id="pv-notif-complete-body">Suspicious message was sent to the lab.</span>
+                          </div>
+                          <div class="pv-notif-card bad">
+                            <strong id="pv-notif-failed-title">Upload failed</strong>
+                            <span id="pv-notif-failed-body">Suspicious message could not be sent.</span>
+                          </div>
+                        </div>
                         <div class="pv-screen" data-screen="icon" style="align-items:center;justify-content:center;gap:0.75rem">
                           <div class="preview-launcher" id="pv-launcher" style="border:none;background:transparent;padding:0">
                             <div class="pv-icon" id="pv-icon"><span id="pv-icon-fallback">CM</span><span class="pv-icon-overlay" hidden></span></div>
@@ -3401,6 +4006,7 @@
               <span class="hint" id="build-company-hint">selected company</span>
             </div>
             <p class="meta-line">Builds the <strong>selected company + version</strong> already saved above (Save branding first). The launcher image and text styling come from General settings. Artefacts land in <code>data/mobile/&lt;company&gt;/&lt;version&gt;/</code>. Requires Flutter on this host.</p>
+            <p class="meta-line" id="build-locales-hint">Languages: English, Français, Español</p>
             <div class="checks" style="margin:1rem 0 0.5rem">
               <label><input id="build-android" type="checkbox" checked /> Android APK</label>
               <label><input id="build-ios" type="checkbox" /> iOS (simulator)</label>
@@ -3439,6 +4045,7 @@
             <p class="meta-line">Generated client apps for the selected company. Delete removes the artefact from disk.</p>
             <div class="split-actions" style="margin-top:0.5rem">
               <button type="button" class="ghost sm" id="mobile-refresh-downloads">Refresh</button>
+              <button type="button" class="ghost sm" id="mobile-keep-latest" title="Delete older app builds; keep the newest versioned APK/IPA per branding folder">Keep latest only</button>
               <button type="button" class="danger sm" id="mobile-delete-all" title="Delete all listed builds for this company">Delete all listed</button>
             </div>
             <div id="mobile-builds" class="meta-line" style="margin-top:0.75rem">Loading builds…</div>
@@ -3461,8 +4068,13 @@
         <div class="card">
           <form class="row" id="settings-form">
             <label>Display name
-              <input name="display_name" type="text" required />
+              <input name="display_name" type="text" required maxlength="64" placeholder="CollecteMoi Lab" />
             </label>
+            <p class="meta-line" style="grid-column:1 / -1;margin:-0.35rem 0 0">
+              Lab / product name returned at enrollment and shown in the mobile app title
+              (Home, My data). Change it here for new enrollments; phones can also rename
+              locally or pull this value from Settings → Use server name.
+            </p>
             <label>Public URL
               <input name="public_url" type="url" required />
             </label>
@@ -3470,27 +4082,76 @@
               <label><input name="lab_seal" type="checkbox" /> Lab seal</label>
               <label><input name="allow_dev_envelope" type="checkbox" /> Allow CMDEV</label>
             </div>
+            <label style="grid-column:1 / -1">OTP delivery webhook URL
+              <input name="otp_delivery_webhook_url" type="url" placeholder="https://mail.example/hooks/collectemoi-otp" autocomplete="off" />
+            </label>
+            <label style="grid-column:1 / -1">OTP webhook Bearer token (optional)
+              <input name="otp_delivery_webhook_token" type="password" placeholder="optional shared secret" autocomplete="off" />
+            </label>
+            <p class="meta-line" style="grid-column:1 / -1;margin:0">
+              On email enroll, the API <span class="mono">POST</span>s JSON
+              (<span class="mono">email</span>, <span class="mono">code</span>, <span class="mono">expires_in_secs</span>, …)
+              to this URL. Leave empty for lab-only reveal / lab keys. Env:
+              <span class="mono">COLLECTEMOI_OTP_WEBHOOK_URL</span>.
+            </p>
             <div class="split-actions">
               <button class="primary" type="submit">Save settings</button>
             </div>
           </form>
           <p class="meta-line" id="settings-meta"></p>
         </div>
+        <div class="card" style="margin-top:1rem" id="settings-storage-card">
+          <div class="card-title">
+            <h3>Data storage</h3>
+            <span class="hint" id="storage-hint">path · disk usage</span>
+          </div>
+          <p class="meta-line">Lab catalogue, uploads, blobs, TLS certs, and build caches live under this directory (Docker: volume mounted at <span class="mono">/data</span>).</p>
+          <dl class="runtime-grid" id="storage-paths" style="margin-top:0.75rem"></dl>
+          <div id="storage-disk" style="margin-top:0.85rem"></div>
+          <div id="storage-breakdown" style="margin-top:0.85rem"></div>
+          <div class="split-actions" style="margin-top:0.75rem">
+            <button type="button" class="ghost sm" id="btn-storage-refresh">Refresh usage</button>
+          </div>
+          <div class="card-title" style="margin-top:1.25rem">
+            <h3>Delete data</h3>
+            <span class="hint">irreversible · keeps admin / TLS / companies</span>
+          </div>
+          <p class="meta-line">Choose what to remove from this lab’s data directory. Admin password, TLS certificates, settings, companies, lab keys, and case encryption keys are <strong>not</strong> deleted.</p>
+          <form id="storage-wipe-form" class="row" style="margin-top:0.75rem">
+            <div class="checks" style="grid-column:1 / -1">
+              <label><input name="collected" type="checkbox" checked /> Collected evidence (uploads, blobs, jobs, analysis)</label>
+              <label><input name="logs" type="checkbox" /> Access &amp; enrollment logs</label>
+              <label><input name="mobile_builds" type="checkbox" /> Mobile builds (<span class="mono">data/mobile</span>)</label>
+              <label><input name="build_caches" type="checkbox" /> Build caches (<span class="mono">.pub-cache</span>, <span class="mono">.gradle</span>)</label>
+              <label><input name="devices" type="checkbox" /> Enrolled devices</label>
+            </div>
+            <label>Admin password
+              <input name="password" type="password" autocomplete="current-password" required />
+            </label>
+            <label>Type DELETE to confirm
+              <input name="confirm" type="text" autocomplete="off" placeholder="DELETE" required />
+            </label>
+            <div class="split-actions" style="grid-column:1 / -1">
+              <button type="submit" class="danger">Delete selected data</button>
+            </div>
+          </form>
+          <p class="meta-line" id="storage-wipe-meta"></p>
+        </div>
         <div class="card" style="margin-top:1rem">
           <div class="card-title">
             <h3>Security</h3>
-            <span class="hint">password required · TOTP &amp; YubiKey optional</span>
+            <span class="hint">12+ character password · TOTP &amp; YubiKey recommended</span>
           </div>
-          <p class="meta-line">Admin sessions use HttpOnly cookies. A password is required. Enable TOTP and/or a YubiKey anytime for a second factor.</p>
+          <p class="meta-line">Admin sessions use HttpOnly cookies. Use a unique password. Enable TOTP and/or a YubiKey for a second factor.</p>
           <form class="row" id="password-form" style="margin-top:0.75rem">
             <label>Current password
               <input name="current_password" type="password" autocomplete="current-password" required />
             </label>
             <label>New password
-              <input name="new_password" type="password" autocomplete="new-password" required />
+              <input name="new_password" type="password" autocomplete="new-password" minlength="12" maxlength="128" required />
             </label>
             <label>Confirm new password
-              <input name="new_password2" type="password" autocomplete="new-password" required />
+              <input name="new_password2" type="password" autocomplete="new-password" minlength="12" maxlength="128" required />
             </label>
             <div class="split-actions">
               <button class="primary" type="submit">Change password</button>
@@ -3580,7 +4241,7 @@
       <div class="svc-sheet-head">
         <div>
           <h2 id="svc-title">Service status</h2>
-          <p id="svc-subtitle">Live probe of <span class="mono">/healthz</span> and <span class="mono">/v1/status</span></p>
+          <p id="svc-subtitle">Live probe of <span class="mono">/healthz</span> and <span class="mono">/v1/admin/status</span></p>
         </div>
         <button type="button" class="ghost" id="svc-close" aria-label="Close">Close</button>
       </div>
@@ -3599,7 +4260,7 @@
             Status API
           </div>
           <div class="svc-state"><span class="dot"></span><span id="svc-api-state">Checking…</span></div>
-          <div class="svc-meta" id="svc-api-meta">Probing /v1/status…</div>
+          <div class="svc-meta" id="svc-api-meta">Probing /v1/admin/status…</div>
         </div>
       </div>
       <div class="svc-kpis" id="svc-kpis"></div>
@@ -3608,7 +4269,7 @@
         <dl id="svc-settings-dl"></dl>
       </div>
       <details class="svc-raw" id="svc-raw">
-        <summary>Raw /v1/status JSON</summary>
+        <summary>Raw /v1/admin/status JSON</summary>
         <pre id="svc-raw-pre">—</pre>
       </details>
       <div class="svc-actions">
@@ -3625,12 +4286,14 @@
     const $ = (id) => document.getElementById(id);
     const themeSelect = $("theme-select");
     const storedTheme = localStorage.getItem("collectemoi-admin-theme");
-    const initialTheme = storedTheme === "light" ? "light" : "dark";
+    const allowedThemes = new Set(["dark", "light", "simple"]);
+    const initialTheme = allowedThemes.has(storedTheme) ? storedTheme : "dark";
     document.body.dataset.theme = initialTheme;
     themeSelect.value = initialTheme;
     themeSelect.addEventListener("change", () => {
-      document.body.dataset.theme = themeSelect.value;
-      localStorage.setItem("collectemoi-admin-theme", themeSelect.value);
+      const next = allowedThemes.has(themeSelect.value) ? themeSelect.value : "dark";
+      document.body.dataset.theme = next;
+      localStorage.setItem("collectemoi-admin-theme", next);
     });
     const state = {
       paused: false,
@@ -3721,6 +4384,140 @@
       if (compact || i === 0) return human;
       const raw = Math.round(n).toLocaleString("en-US");
       return `${human} (${raw} B)`;
+    }
+
+    /** Bytes/sec → compact "1.2 MB/s" */
+    function formatRate(bps) {
+      return `${formatBytes(bps ?? 0, { compact: true })}/s`;
+    }
+
+    function renderActivityGraph(activity) {
+      const host = $("dash-activity-body");
+      const hint = $("dash-activity-hint");
+      if (!host) return;
+      const history = Array.isArray(activity?.history) ? activity.history : [];
+      const enrollTotal = activity?.enrollments_total ?? history.reduce((n, p) => n + (Number(p.enrollments) || 0), 0);
+      const submitTotal = activity?.submissions_total ?? history.reduce((n, p) => n + (Number(p.submissions) || 0), 0);
+      const downloadTotal = activity?.downloads_total ?? history.reduce((n, p) => n + (Number(p.downloads) || 0), 0);
+      const peak = Math.max(
+        1,
+        ...history.map((p) => Math.max(
+          Number(p.enrollments) || 0,
+          Number(p.submissions) || 0,
+          Number(p.downloads) || 0
+        ))
+      );
+      const hours = Math.round((activity?.window_secs || 86400) / 3600);
+      if (hint) {
+        hint.textContent = history.length
+          ? `last ${hours}h · hourly · ${enrollTotal + submitTotal + downloadTotal} events`
+          : `last ${hours}h · hourly buckets`;
+      }
+      const w = 560;
+      const h = 120;
+      const padX = 8;
+      const padY = 10;
+      const innerW = w - padX * 2;
+      const innerH = h - padY * 2;
+      const pts = history.length
+        ? history
+        : [{ enrollments: 0, submissions: 0, downloads: 0 }, { enrollments: 0, submissions: 0, downloads: 0 }];
+      const n = Math.max(pts.length, 2);
+      const xAt = (i) => padX + (i / (n - 1)) * innerW;
+      const yAt = (v) => padY + innerH - (Math.min(Number(v) || 0, peak) / peak) * innerH;
+      const line = (key) => pts.map((p, i) =>
+        `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yAt(p[key]).toFixed(1)}`
+      ).join(" ");
+      const enrollLine = line("enrollments");
+      const submitLine = line("submissions");
+      const downloadLine = line("downloads");
+      const area = `${enrollLine} L${xAt(pts.length - 1).toFixed(1)},${(padY + innerH).toFixed(1)} L${xAt(0).toFixed(1)},${(padY + innerH).toFixed(1)} Z`;
+      const grids = [0.25, 0.5, 0.75].map((f) => {
+        const y = padY + innerH * (1 - f);
+        return `<line class="grid-line" x1="${padX}" x2="${w - padX}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" />`;
+      }).join("");
+      const last = pts[pts.length - 1] || {};
+      host.innerHTML = `
+        <div class="dash-net-chart">
+          <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Enrollments, submissions, and downloads over time">
+            ${grids}
+            <path class="area-enroll" d="${area}"></path>
+            <path class="line-enroll" d="${enrollLine}"></path>
+            <path class="line-submit" d="${submitLine}"></path>
+            <path class="line-download" d="${downloadLine}"></path>
+          </svg>
+          <div class="dash-net-legend">
+            <span class="enroll"><i></i>Enroll ${esc(enrollTotal)}</span>
+            <span class="submit"><i></i>Submit ${esc(submitTotal)}</span>
+            <span class="download"><i></i>Download ${esc(downloadTotal)}</span>
+            <span>peak/hour ${esc(peak)}</span>
+          </div>
+        </div>
+        <div class="dash-net-stats">
+          <div class="dash-net-stat"><span class="k">Enrollments</span><span class="v enroll">${esc(enrollTotal)} <span style="font-size:0.75rem;color:var(--ink-faint)">· ${esc(last.enrollments || 0)} this hour</span></span></div>
+          <div class="dash-net-stat"><span class="k">Submissions</span><span class="v submit">${esc(submitTotal)} <span style="font-size:0.75rem;color:var(--ink-faint)">· ${esc(last.submissions || 0)} this hour</span></span></div>
+          <div class="dash-net-stat"><span class="k">Downloads</span><span class="v download">${esc(downloadTotal)} <span style="font-size:0.75rem;color:var(--ink-faint)">· ${esc(last.downloads || 0)} this hour</span></span></div>
+          <a class="btn sm ghost" href="#devices">Devices →</a>
+        </div>`;
+    }
+
+    function renderNetworkGraph(bw) {
+      const host = $("dash-net-body");
+      const hint = $("dash-net-hint");
+      if (!host) return;
+      const history = Array.isArray(bw?.history) ? bw.history : [];
+      const rxNow = bw?.rx_bps ?? 0;
+      const txNow = bw?.tx_bps ?? 0;
+      const peak = Math.max(
+        Number(bw?.peak_bps) || 0,
+        ...history.map((p) => (Number(p.rx_bps) || 0) + (Number(p.tx_bps) || 0)),
+        rxNow + txNow,
+        1
+      );
+      if (hint) {
+        hint.textContent = history.length
+          ? `last ${history.length}s · peak ${formatRate(peak)}`
+          : `${bw?.window_secs || 10}s rate window`;
+      }
+      const w = 560;
+      const h = 120;
+      const padX = 8;
+      const padY = 10;
+      const innerW = w - padX * 2;
+      const innerH = h - padY * 2;
+      const n = Math.max(history.length, 2);
+      const xAt = (i) => padX + (i / (n - 1)) * innerW;
+      const yAt = (bps) => padY + innerH - (Math.min(Number(bps) || 0, peak) / peak) * innerH;
+      const pts = history.length
+        ? history
+        : [{ rx_bps: rxNow, tx_bps: txNow }, { rx_bps: rxNow, tx_bps: txNow }];
+      const rxLine = pts.map((p, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yAt(p.rx_bps).toFixed(1)}`).join(" ");
+      const txLine = pts.map((p, i) => `${i === 0 ? "M" : "L"}${xAt(i).toFixed(1)},${yAt(p.tx_bps).toFixed(1)}`).join(" ");
+      const area = `${rxLine} L${xAt(pts.length - 1).toFixed(1)},${(padY + innerH).toFixed(1)} L${xAt(0).toFixed(1)},${(padY + innerH).toFixed(1)} Z`;
+      const grids = [0.25, 0.5, 0.75].map((f) => {
+        const y = padY + innerH * (1 - f);
+        return `<line class="grid-line" x1="${padX}" x2="${w - padX}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" />`;
+      }).join("");
+      host.innerHTML = `
+        <div class="dash-net-chart">
+          <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="RX and TX throughput over time">
+            ${grids}
+            <path class="area-rx" d="${area}"></path>
+            <path class="line-rx" d="${rxLine}"></path>
+            <path class="line-tx" d="${txLine}"></path>
+          </svg>
+          <div class="dash-net-legend">
+            <span class="rx"><i></i>RX ${esc(formatRate(rxNow))}</span>
+            <span class="tx"><i></i>TX ${esc(formatRate(txNow))}</span>
+            <span>total ↓${esc(formatBytes(bw?.rx_total ?? 0, { compact: true }))} ↑${esc(formatBytes(bw?.tx_total ?? 0, { compact: true }))}</span>
+          </div>
+        </div>
+        <div class="dash-net-stats">
+          <div class="dash-net-stat"><span class="k">Download</span><span class="v rx">↓ ${esc(formatRate(rxNow))}</span></div>
+          <div class="dash-net-stat"><span class="k">Upload</span><span class="v tx">↑ ${esc(formatRate(txNow))}</span></div>
+          <div class="dash-net-stat"><span class="k">Peak (window)</span><span class="v">${esc(formatRate(peak))}</span></div>
+          <a class="btn sm ghost" href="#apiaccess">API access →</a>
+        </div>`;
     }
 
     function toast(msg, err = false) {
@@ -4013,6 +4810,32 @@
       return `<a class="pill company" href="#companies/${esc(id)}" data-nav-tab="companies" data-nav-id="${esc(id)}" title="${esc(id)}"${style}>${esc(label)}</a>`;
     }
 
+    /** Color audit event names: fail/error → bad, ban/chunk → warn, ok/upload → ok. */
+    function enrollEventPill(event, detail) {
+      const name = String(event || "");
+      const lower = name.toLowerCase();
+      let tone = "accent";
+      if (lower.includes("fail") || lower.includes("error") || lower.includes("reject") || /status=[45]/.test(String(detail || ""))) {
+        tone = "bad";
+      } else if (lower.includes("ban") && !lower.includes("unban")) {
+        tone = "warn";
+      } else if (lower.includes("upload_chunk") || lower.includes("upload_create")) {
+        tone = "warn";
+      } else if (
+        lower.includes("unban") ||
+        lower.endsWith("_ok") ||
+        lower.includes("consumed") ||
+        lower === "upload_complete" ||
+        lower === "blob_download" ||
+        lower.startsWith("upload_") ||
+        lower.startsWith("blob_")
+      ) {
+        tone = "ok";
+      }
+      const tip = detail ? ` title="${esc(detail)}"` : "";
+      return `<span class="pill ${tone}"${tip}>${esc(name || "—")}</span>`;
+    }
+
     function syncCompanyColorInputs(form) {
       if (!form?.color || !form.color_picker) return;
       const hex = normalizeCompanyHex(form.color.value, form.color_picker.value || "#2EC4A0");
@@ -4244,6 +5067,10 @@
         if (id) openCompanyDetail(id);
         else showCompaniesList();
       }
+      if (name === "settings") {
+        if (state.cache?.storage) renderStorage(state.cache.storage);
+        refreshStorage();
+      }
       if (id) {
         const kind = name === "devices" ? "device" : name === "blobs" ? "blob" : name;
         if (name === "devices" || name === "blobs") {
@@ -4268,8 +5095,14 @@
       const key = expandKey(kind, id);
       const row = document.querySelector(`[data-expand-key="${CSS.escape(key)}"]`);
       if (!row) return;
+      state.expanded.add(key);
       row.classList.add("open", "flash");
       row.querySelector(".expand-summary")?.setAttribute("aria-expanded", "true");
+      // Message-report image previews only load once the row is open.
+      row.querySelectorAll("[data-msg-preview]").forEach((el) => {
+        const blobId = el.getAttribute("data-msg-preview");
+        if (blobId) loadMessageReportPreview(el, blobId);
+      });
       row.scrollIntoView({ behavior: "smooth", block: "center" });
       setTimeout(() => row.classList.remove("flash"), 1600);
     }
@@ -4278,6 +5111,29 @@
       if (!deviceId) return esc(label || "—");
       const text = label == null || label === "" ? deviceId : label;
       return `<a class="xlink" href="#devices/${esc(deviceId)}" data-nav-tab="devices" data-nav-id="${esc(deviceId)}">${esc(text)}</a>`;
+    }
+
+    function knownDevice(deviceId) {
+      if (!deviceId) return null;
+      const id = String(deviceId);
+      return (state.cache.devices || []).find((d) => String(d.device_id) === id) || null;
+    }
+
+    /** Short human label for a device id (model / email / name) when enrolled. */
+    function deviceLogLabel(deviceId, platform = "", model = "") {
+      if (!deviceId) return "";
+      const d = knownDevice(deviceId);
+      const bits = [];
+      const name = (d?.device_name || "").trim();
+      const email = (d?.email || "").trim();
+      const m = (d?.model || model || "").trim();
+      const p = (d?.platform || platform || "").trim();
+      if (name) bits.push(name);
+      else if (m) bits.push(m);
+      if (email) bits.push(email);
+      else if (p && !name) bits.push(p);
+      const idShort = short(String(deviceId), 10);
+      return bits.length ? `${bits.join(" · ")} (${idShort})` : idShort;
     }
 
     function blobLink(blobId, label) {
@@ -4291,6 +5147,100 @@
         ? `<div class="copy-cell"><button type="button" class="sm ghost" data-copy="${esc(copyValue)}">Copy</button></div>`
         : `<div class="copy-cell"></div>`;
       return `<dt>${esc(label)}</dt><dd>${html}</dd>${copyBtn}`;
+    }
+
+    /** Parse device.details_json into a plain object. */
+    function deviceDetailsObject(d) {
+      const raw = d?.details_json;
+      if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw;
+      if (typeof raw === "string" && raw.trim()) {
+        try {
+          const obj = JSON.parse(raw);
+          if (obj && typeof obj === "object" && !Array.isArray(obj)) return obj;
+        } catch (_) {}
+      }
+      return {};
+    }
+
+    function deviceDetailValue(d, ...keys) {
+      const obj = deviceDetailsObject(d);
+      for (const k of keys) {
+        const v = obj?.[k];
+        if (v != null && String(v).trim()) return String(v).trim();
+      }
+      return "";
+    }
+
+    const DEVICE_DETAIL_LABELS = {
+      security_patch: "Security patch",
+      api_level: "API level",
+      sdk: "Android SDK",
+      android_release: "Android release",
+      build_incremental: "Build incremental",
+      build_id: "Build ID",
+      build_display: "Build display",
+      build_type: "Build type",
+      build_tags: "Build tags",
+      build_host: "Build host",
+      base_os: "Base OS",
+      codename: "Codename",
+      preview_sdk: "Preview SDK",
+      board: "Board",
+      bootloader: "Bootloader",
+      hardware: "Hardware",
+      product: "Product",
+      abis: "ABIs",
+      physical: "Physical device",
+      system: "OS name",
+      ios_version: "iOS version",
+      model_id: "Model id",
+      model_name: "Model name",
+      localized_model: "Localized model",
+      machine: "Machine",
+      darwin_release: "Darwin release",
+      darwin_version: "Darwin version",
+      idfv: "Vendor ID",
+      vendor: "Browser vendor",
+      language: "Language",
+    };
+
+    /** Highlighted OS / patch rows + remaining details_json keys. */
+    function deviceDetailsRows(d) {
+      const obj = deviceDetailsObject(d);
+      const patch = deviceDetailValue(d, "security_patch");
+      const api = deviceDetailValue(d, "api_level", "sdk");
+      const buildId = deviceDetailValue(d, "build_id");
+      const preferred = [];
+      if (patch) preferred.push(fieldRow("Security patch", patch));
+      if (api) preferred.push(fieldRow("API level", api));
+      if (buildId) preferred.push(fieldRow("Build ID", buildId, true));
+
+      const skip = new Set([
+        "fingerprint", "idfv", "user_agent",
+        "security_patch", "api_level", "sdk", "build_id",
+      ]);
+      const rest = Object.entries(obj)
+        .filter(([k, v]) => k && v != null && String(v).trim() && !skip.has(String(k)))
+        .sort(([a], [b]) => String(a).localeCompare(String(b)))
+        .map(([k, v]) => {
+          const label = DEVICE_DETAIL_LABELS[k] || String(k).replace(/_/g, " ");
+          return fieldRow(label, String(v));
+        });
+      return preferred.concat(rest).join("");
+    }
+
+    function deviceHardwareMeta(d) {
+      const bits = [];
+      if (d?.manufacturer) bits.push(d.manufacturer);
+      else if (d?.brand) bits.push(d.brand);
+      if (d?.model) bits.push(d.model);
+      else if (d?.device_name) bits.push(d.device_name);
+      if (d?.os_version) bits.push(d.os_version);
+      const patch = deviceDetailValue(d, "security_patch");
+      if (patch) bits.push(`patch ${patch}`);
+      const api = deviceDetailValue(d, "api_level", "sdk");
+      if (api && !(d?.os_version || "").includes(`API ${api}`)) bits.push(`API ${api}`);
+      return bits.length ? bits.join(" / ") : `${d?.platform || "—"} / ${d?.model || "—"}`;
     }
 
     function wireNavLinks(root) {
@@ -4311,6 +5261,26 @@
         const upk = (b.uploader?.public_key || b.device_public_key || "").toLowerCase();
         return (id && uid === id) || (pk && upk && upk === pk);
       });
+    }
+
+    function sortBlobsNewestFirst(blobs) {
+      return (blobs || []).slice().sort((a, b) => {
+        const ta = parseDate(a?.created_at)?.getTime() || 0;
+        const tb = parseDate(b?.created_at)?.getTime() || 0;
+        return tb - ta;
+      });
+    }
+
+    function deviceSubmissionSummary(device) {
+      const related = sortBlobsNewestFirst(blobsForDevice(device));
+      const last = related[0] || null;
+      return {
+        related,
+        last,
+        count: related.length,
+        lastAt: last?.created_at || null,
+        lastArtefact: last?.artefact || last?.filename || null,
+      };
     }
 
     function blobForUpload(uploadId) {
@@ -4512,6 +5482,15 @@
       if (pendingUploads > 0) {
         chips.push(`<span class="health-chip warn"><span class="hdot"></span> ${pendingUploads} upload${pendingUploads === 1 ? "" : "s"} open</span>`);
       }
+      const bw = o.bandwidth || {};
+      const rxBps = bw.rx_bps ?? 0;
+      const txBps = bw.tx_bps ?? 0;
+      const bwBusy = (rxBps + txBps) > 0;
+      chips.push(
+        bwBusy
+          ? `<span class="health-chip"><span class="hdot"></span> Net ↓${esc(formatRate(rxBps))} ↑${esc(formatRate(txBps))}</span>`
+          : `<span class="health-chip"><span class="hdot"></span> Net idle</span>`
+      );
       $("dash-health").innerHTML = chips.join("");
 
       // Primary KPIs
@@ -4547,6 +5526,13 @@
           href: "#blobs",
           link: "Blobs →",
         },
+        {
+          label: "API hits",
+          value: o.access_total ?? 0,
+          meta: `${o.blob_downloads ?? 0} blob DL`,
+          href: "#apiaccess",
+          link: "Access →",
+        },
       ];
       $("dash-kpis").innerHTML = kpis.map((k) => `
         <div class="kpi ${k.tone || ""}">
@@ -4555,6 +5541,8 @@
           ${k.progress != null ? `<div class="dash-progress" title="${esc(k.progress)}%"><span style="width:${k.progress}%"></span></div>` : ""}
           <div class="kpi-meta"><span>${esc(k.meta)}</span><a href="${esc(k.href)}">${esc(k.link)}</a></div>
         </div>`).join("");
+      renderNetworkGraph(bw);
+      renderActivityGraph(o.activity || {});
 
       // Secondary strip
       const mini = [
@@ -4562,6 +5550,8 @@
         ["Lab keys", o.lab_keys ?? labKeys.length],
         ["Scoped keys", scopedKeys],
         ["API hits", o.access_total ?? 0],
+        ["RX total", formatBytes(bw.rx_total ?? 0, { compact: true })],
+        ["TX total", formatBytes(bw.tx_total ?? 0, { compact: true })],
         ["Banned", o.banned_keys ?? 0],
         ["Version", o.version || "—"],
       ];
@@ -4704,7 +5694,10 @@
         ["Case PK", short(o.case_public_key || "", 28)],
         ["Lab seal", s.lab_seal ? "on" : "off"],
         ["CMDEV", s.allow_dev_envelope ? "allowed" : "blocked"],
+        ["OTP webhook", s.otp_delivery_webhook_url ? short(s.otp_delivery_webhook_url, 40) : "off"],
         ["Public URL", s.public_url || "—"],
+        ["Bandwidth", `↓${formatRate(rxBps)} ↑${formatRate(txBps)} (${bw.window_secs || 10}s)`],
+        ["RX / TX total", `${formatBytes(bw.rx_total ?? 0, { compact: true })} / ${formatBytes(bw.tx_total ?? 0, { compact: true })}`],
         ["Started", formatTs(o.started_at)],
       ].map(([k, v]) => `<div><dt>${esc(k)}</dt><dd title="${esc(v)}">${esc(v)}</dd></div>`).join("");
 
@@ -4722,10 +5715,106 @@
       f.public_url.value = s.public_url || "";
       f.lab_seal.checked = !!s.lab_seal;
       f.allow_dev_envelope.checked = !!s.allow_dev_envelope;
+      if (f.otp_delivery_webhook_url) {
+        f.otp_delivery_webhook_url.value = s.otp_delivery_webhook_url || "";
+      }
+      if (f.otp_delivery_webhook_token) {
+        f.otp_delivery_webhook_token.value = s.otp_delivery_webhook_token || "";
+      }
       $("settings-meta").textContent =
         `bind ${s.bind} · tls ${s.tls ? "on" : "off"}` +
         (s.tls_cert ? ` · cert ${short(s.tls_cert, 40)}` : "") +
         ` · data ${s.data_dir} · log ${s.log} · case pk ${short(s.case_public_key || "", 24)}`;
+      // Keep path visible even before /storage returns.
+      if ($("storage-paths") && s.data_dir && !$("storage-paths").dataset.loaded) {
+        $("storage-paths").innerHTML = [
+          ["Data directory", s.data_dir],
+          ["Log file", s.log || "—"],
+        ].map(([k, v]) => `<div><dt>${esc(k)}</dt><dd title="${esc(v)}">${esc(v)}</dd></div>`).join("");
+      }
+    }
+
+    function renderStorage(stats) {
+      const paths = $("storage-paths");
+      const disk = $("storage-disk");
+      const breakdown = $("storage-breakdown");
+      const hint = $("storage-hint");
+      if (!paths || !disk || !breakdown) return;
+      if (!stats) {
+        paths.innerHTML = emptyHtml("Storage stats unavailable.");
+        disk.innerHTML = "";
+        breakdown.innerHTML = "";
+        if (hint) hint.textContent = "unavailable";
+        return;
+      }
+      paths.dataset.loaded = "1";
+      paths.innerHTML = [
+        ["Data directory", stats.data_dir || "—"],
+        ["Data used", formatBytes(stats.data_bytes || 0)],
+      ].map(([k, v]) => `<div><dt>${esc(k)}</dt><dd title="${esc(v)}">${esc(v)}</dd></div>`).join("");
+
+      const total = Number(stats.disk_total_bytes) || 0;
+      const used = Number(stats.disk_used_bytes) || 0;
+      const free = Number(stats.disk_free_bytes) || 0;
+      if (total > 0) {
+        const pct = Math.min(100, Math.round((used / total) * 100));
+        const tone = pct >= 90 ? "bad" : pct >= 75 ? "warn" : "ok";
+        if (hint) {
+          hint.textContent = `${formatBytes(free, { compact: true })} free · ${pct}% used`;
+        }
+        const fill = tone === "bad"
+          ? "var(--bad)"
+          : tone === "warn"
+            ? "var(--warn)"
+            : "var(--ok)";
+        disk.innerHTML = `
+          <div class="card-title" style="margin:0 0 0.45rem"><h3 style="font-size:0.95rem">Host disk</h3>
+            <span class="hint">${esc(formatBytes(used, { compact: true }))} / ${esc(formatBytes(total, { compact: true }))} · ${esc(pct)}%</span>
+          </div>
+          <div class="bar-track" style="height:10px;border-radius:999px;background:var(--line);overflow:hidden" title="${esc(pct)}% used">
+            <span style="display:block;height:100%;width:${pct}%;background:${fill}"></span>
+          </div>
+          <p class="meta-line" style="margin-top:0.45rem">
+            Free <span class="mono">${esc(formatBytes(free))}</span>
+            · Used <span class="mono">${esc(formatBytes(used))}</span>
+            · Total <span class="mono">${esc(formatBytes(total))}</span>
+          </p>`;
+      } else {
+        if (hint) hint.textContent = formatBytes(stats.data_bytes || 0, { compact: true });
+        disk.innerHTML = `<p class="meta-line">Host disk capacity is unavailable on this platform.</p>`;
+      }
+
+      const rows = (stats.breakdown || []).filter((r) => Number(r.bytes) > 0);
+      if (!rows.length) {
+        breakdown.innerHTML = emptyHtml("No files under the data directory yet.");
+        return;
+      }
+      const max = Math.max(...rows.map((r) => Number(r.bytes) || 0), 1);
+      breakdown.innerHTML = `
+        <div class="card-title" style="margin:0 0 0.45rem"><h3 style="font-size:0.95rem">Breakdown</h3>
+          <span class="hint">${esc(rows.length)} folders</span>
+        </div>
+        <div class="bar-list">${rows.map((r) => {
+          const bytes = Number(r.bytes) || 0;
+          const w = Math.max(2, Math.round((bytes / max) * 100));
+          return `<div class="bar-row" title="${esc(r.path || "")}">
+            <span class="bar-label">${esc(r.name)}</span>
+            <div class="bar-track"><span style="width:${w}%"></span></div>
+            <span class="bar-n">${esc(formatBytes(bytes, { compact: true }))}</span>
+          </div>`;
+        }).join("")}</div>`;
+    }
+
+    async function refreshStorage() {
+      if (document.body.classList.contains("locked") || !state.auth?.authenticated) return;
+      try {
+        const stats = await api("/v1/admin/storage");
+        state.cache.storage = stats;
+        renderStorage(stats);
+      } catch (e) {
+        renderStorage(null);
+        toast(String(e.message || e), true);
+      }
     }
 
     function renderOverviewEnroll(list) {
@@ -4741,12 +5830,13 @@
         return;
       }
       $("overview-enroll").innerHTML = wrapTable(`<table>
-        <thead><tr><th>When</th><th>Event</th><th>Company</th><th>Who</th></tr></thead>
-        <tbody>${filtered.slice(0, 12).map((e) => `<tr>
+        <thead><tr><th>When</th><th>Event</th><th>Company</th><th>Who</th><th>Detail</th></tr></thead>
+        <tbody>${filtered.slice(0, 16).map((e) => `<tr>
           <td class="mono" title="${esc(e.ts)}">${esc(formatTs(e.ts))}</td>
-          <td><span class="pill accent">${esc(e.event)}</span></td>
+          <td>${enrollEventPill(e.event, e.detail)}</td>
           <td>${companyPill(e.company_id || "")}</td>
           <td class="mono">${esc(short(e.email || e.lab_key || "—", 28))}</td>
+          <td class="mono" title="${esc(e.detail || "")}">${esc(short(e.detail || "—", 40))}</td>
         </tr>`).join("")}</tbody></table>`);
       wireNavLinks($("overview-enroll"));
     }
@@ -4768,6 +5858,12 @@
       if (key) {
         if (open) state.expanded.add(key);
         else state.expanded.delete(key);
+      }
+      if (open) {
+        row.querySelectorAll("[data-msg-preview]").forEach((el) => {
+          const id = el.getAttribute("data-msg-preview");
+          if (id) loadMessageReportPreview(el, id);
+        });
       }
     }
 
@@ -4816,6 +5912,7 @@
         if (coFilter && coFilter !== "__none__" && cid !== coFilter) return false;
         return matchesFilter(
           [d.device_id, d.case_id, d.email, cid, d.company_id, companyName(cid), d.platform, d.model, d.os_version,
+           d.app_version, d.manufacturer, d.brand, d.device_name, d.last_seen_at,
            d.public_key, d.noise_key, d.noise_key_fingerprint].join(" "),
           q
         );
@@ -4826,7 +5923,7 @@
       }
       $("devices").innerHTML = `<div class="expand-list">
         <div class="expand-list-head" aria-hidden="true">
-          <span></span><span>Device</span><span>Company</span><span>Enrolled</span><span class="h-status">Status</span><span></span>
+          <span></span><span>Device</span><span>Company</span><span>Last submit</span><span class="h-status">Status</span><span></span>
         </div>
         ${filtered.map((d) => {
         const cid = deviceCompanyId(d);
@@ -4838,7 +5935,12 @@
             : `<span class="pill warn">no noise</span>`);
         const key = expandKey("device", d.device_id);
         const open = state.expanded.has(key) ? " open" : "";
-        const related = blobsForDevice(d);
+        const sub = deviceSubmissionSummary(d);
+        const related = sub.related;
+        const sideTs = sub.lastAt || d.enrolled_at;
+        const sideTitle = sub.lastAt
+          ? `Last submission: ${formatTs(sub.lastAt)}\nEnrolled: ${formatTs(d.enrolled_at)}\n${sub.count} submission${sub.count === 1 ? "" : "s"}`
+          : `Enrolled: ${formatTs(d.enrolled_at)}\nNo submissions yet`;
         const blobLinks = related.length
           ? related.map((b) =>
               `<div>${blobLink(b.blob_id, b.filename || b.artefact || short(b.blob_id, 13))}
@@ -4850,28 +5952,41 @@
             <span class="expand-chevron">▸</span>
             <span class="expand-main">
               <span class="label">${esc(d.email || d.platform || "Device")}</span>
-              <span class="meta">${esc(short(d.device_id, 18))} · ${esc(d.platform || "—")} / ${esc(d.model || "—")}${related.length ? ` · ${related.length} blob${related.length === 1 ? "" : "s"}` : ""}</span>
+              <span class="meta">${esc(short(d.device_id, 18))} · ${esc(deviceHardwareMeta(d))}${d.app_version ? ` · app ${esc(d.app_version)}` : ""}${sub.count ? ` · ${sub.count} blob${sub.count === 1 ? "" : "s"}` : " · no blobs"}</span>
             </span>
             <span class="expand-company">${companyPill(cid)}</span>
-            <span class="expand-side" title="${esc(formatTs(d.enrolled_at))}">${esc(formatTsShort(d.enrolled_at))}</span>
+            <span class="expand-side" title="${esc(sideTitle)}">${esc(formatTsShort(sideTs))}${sub.lastAt ? "" : " · enroll"}</span>
             <span class="expand-status">${status}</span>
             <span class="expand-actions">
               <button type="button" class="sm" data-ban-device="${esc(d.device_id)}" data-banned="${banned ? "0" : "1"}">
                 ${banned ? "Unban" : "Ban"}
+              </button>
+              <button type="button" class="sm ghost" data-rate-bypass="${esc(d.device_id)}" data-bypass="${d.rate_limit_bypass ? "0" : "1"}" title="Ignore company uploads-per-hour quota">
+                ${d.rate_limit_bypass ? "Enforce quota" : "Bypass quota"}
               </button>
             </span>
           </div>
           <div class="expand-detail">
             <dl class="detail-dl">
               ${fieldRow("Enrolled", formatTs(d.enrolled_at))}
+              ${fieldRow("Last submission", sub.lastAt ? formatTs(sub.lastAt) : "—")}
+              ${fieldRow("Submissions", String(sub.count))}
+              ${fieldRow("Last artefact", sub.lastArtefact || "—")}
+              ${fieldRow("Last seen", d.last_seen_at ? formatTs(d.last_seen_at) : "—")}
+              ${fieldRow("App version", d.app_version || "—")}
               ${fieldRowHtml("Device ID", deviceLink(d.device_id), d.device_id)}
               ${fieldRow("Case ID", d.case_id, true)}
               ${fieldRow("Email", d.email || "—")}
               ${fieldRowHtml("Company", companyPill(cid), cid || "")}
               ${fieldRow("Platform", d.platform || "—")}
               ${fieldRow("Model", d.model || "—")}
-              ${fieldRow("OS version", d.os_version || "—")}
+              ${fieldRow("OS / system", d.os_version || "—")}
+              ${fieldRow("Manufacturer", d.manufacturer || "—")}
+              ${fieldRow("Brand", d.brand || "—")}
+              ${fieldRow("Device name", d.device_name || "—")}
+              ${deviceDetailsRows(d)}
               ${fieldRow("Banned", banned ? "yes" : "no")}
+              ${fieldRow("Rate-limit bypass", d.rate_limit_bypass ? "yes" : "no")}
               ${fieldRow("Public key", d.public_key, true)}
               ${fieldRow("Noise key", d.noise_key || "—", !!d.noise_key)}
               ${fieldRow("Noise fingerprint", d.noise_key_fingerprint || "—", !!d.noise_key_fingerprint)}
@@ -4880,6 +5995,10 @@
               <div class="card-title"><h3>Blobs</h3><span class="hint">uploaded by this device</span></div>
               ${blobLinks}
             </div>
+            ${related
+              .filter((b) => b.artefact === "message_report")
+              .map((b) => messageReportPreviewCardHtml(b.blob_id))
+              .join("")}
             <div class="row-actions" style="margin-top:0.65rem">
               <button type="button" class="sm ghost" data-copy-json="${esc(d.device_id)}">Copy JSON</button>
             </div>
@@ -4889,6 +6008,7 @@
 
       wireExpandList($("devices"));
       wireNavLinks($("devices"));
+      kickMessageReportPreviews($("devices"));
       $("devices").querySelectorAll("[data-ban-device]").forEach((btn) => {
         btn.addEventListener("click", async (ev) => {
           ev.stopPropagation();
@@ -4900,6 +6020,23 @@
               body: JSON.stringify({ banned }),
             });
             toast(banned ? "Device banned" : "Device unbanned");
+            refresh();
+          } catch (e) {
+            toast(String(e.message || e), true);
+          }
+        });
+      });
+      $("devices").querySelectorAll("[data-rate-bypass]").forEach((btn) => {
+        btn.addEventListener("click", async (ev) => {
+          ev.stopPropagation();
+          const id = btn.getAttribute("data-rate-bypass");
+          const bypass = btn.getAttribute("data-bypass") === "1";
+          try {
+            await api(`/v1/admin/devices/${id}/rate-limit-bypass`, {
+              method: "POST",
+              body: JSON.stringify({ bypass }),
+            });
+            toast(bypass ? "Device can bypass upload quota" : "Device quota enforced again");
             refresh();
           } catch (e) {
             toast(String(e.message || e), true);
@@ -5019,6 +6156,7 @@
             <span class="expand-actions">
               ${deviceId ? `<a class="btn sm" href="#devices/${esc(deviceId)}" data-nav-tab="devices" data-nav-id="${esc(deviceId)}">Device</a>` : ""}
               ${blobId ? `<a class="btn sm" href="#blobs/${esc(blobId)}" data-nav-tab="blobs" data-nav-id="${esc(blobId)}">Blob</a>` : ""}
+              ${!u.complete ? `<button type="button" class="sm danger" data-del-upload="${esc(u.upload_id)}">Delete</button>` : ""}
             </span>
           </div>
           <div class="expand-detail">
@@ -5039,11 +6177,30 @@
               ${fieldRow("Ciphertext SHA-256", u.ciphertext_sha256, true)}
               ${fieldRow("Received map", JSON.stringify(u.received || []))}
             </dl>
+            ${u.artefact === "message_report" && blobId ? messageReportPreviewCardHtml(blobId) : ""}
+            ${!u.complete ? `<div class="row-actions" style="margin-top:0.65rem">
+              <button type="button" class="danger sm" data-del-upload="${esc(u.upload_id)}">Delete incomplete upload</button>
+            </div>` : ""}
           </div>
         </div>`;
       }).join("")}</div>`;
       wireExpandList($("uploads"));
       wireNavLinks($("uploads"));
+      kickMessageReportPreviews($("uploads"));
+      $("uploads").querySelectorAll("[data-del-upload]").forEach((btn) => {
+        btn.addEventListener("click", async (ev) => {
+          ev.stopPropagation();
+          const id = btn.getAttribute("data-del-upload");
+          if (!id || !confirm(`Delete incomplete upload ${id}? Chunks on disk will be removed.`)) return;
+          try {
+            await api(`/v1/admin/uploads/${encodeURIComponent(id)}`, { method: "DELETE" });
+            toast("Incomplete upload deleted");
+            refresh();
+          } catch (e) {
+            toast(String(e.message || e), true);
+          }
+        });
+      });
     }
 
     function renderSharedLabKeys(list) {
@@ -5091,7 +6248,7 @@
       if (!host) return;
       const q = state.filter.companies;
       const filtered = (list || []).filter((c) => matchesFilter(
-        [c.updated_at, c.id, c.name, (c.domains || []).join(" "), c.case_id, c.enabled ? "enabled active" : "paused disabled", c.device_count, c.branding_versions, c.build_count].join(" "),
+        [c.updated_at, c.last_build_at, c.id, c.name, (c.domains || []).join(" "), c.case_id, c.enabled ? "enabled active" : "paused disabled", c.device_count, c.branding_versions, c.build_count].join(" "),
         q
       ));
       if (!filtered.length) {
@@ -5102,7 +6259,7 @@
       }
       host.innerHTML = wrapTable(`<table>
         <thead><tr>
-          <th>Company</th><th>Domains</th><th>Devices</th><th>Branding</th><th>Builds</th><th>Status</th><th></th>
+          <th>Company</th><th>Domains</th><th>Devices</th><th>Branding</th><th>Builds</th><th>Last generated</th><th>Status</th><th></th>
         </tr></thead>
         <tbody>${filtered.map((c) => `<tr data-company-id="${esc(c.id)}">
           <td>
@@ -5115,6 +6272,7 @@
           <td class="mono">${esc(String(c.device_count ?? 0))}</td>
           <td class="mono">${esc(String(c.branding_versions ?? 0))}</td>
           <td class="mono">${esc(String(c.build_count ?? 0))}</td>
+          <td class="mono" title="${esc(c.last_build_at || "")}">${esc(c.build_count ? formatTsShort(c.last_build_at) : "—")}</td>
           <td>${c.enabled
             ? `<span class="pill ok">active</span>`
             : `<span class="pill bad">paused</span>`}</td>
@@ -5164,31 +6322,49 @@
             : `<span class="pill warn">no noise</span>`);
         const key = expandKey("cdevice", d.device_id);
         const open = state.expanded.has(key) ? " open" : "";
+        const sub = deviceSubmissionSummary(d);
+        const sideTs = sub.lastAt || d.enrolled_at;
+        const sideTitle = sub.lastAt
+          ? `Last submission: ${formatTs(sub.lastAt)}\nEnrolled: ${formatTs(d.enrolled_at)}`
+          : `Enrolled: ${formatTs(d.enrolled_at)}\nNo submissions yet`;
         return `<div class="expand-row${open}" data-expand-key="${esc(key)}">
           <div class="expand-summary" role="button" tabindex="0" aria-expanded="${open ? "true" : "false"}">
             <span class="expand-chevron">▸</span>
             <span class="expand-main">
               <span class="label">${esc(d.email || d.platform || "Device")}</span>
-              <span class="meta">${esc(short(d.device_id, 18))} · ${esc(d.platform || "—")} / ${esc(d.model || "—")}</span>
+              <span class="meta">${esc(short(d.device_id, 18))} · ${esc(deviceHardwareMeta(d))}${sub.count ? ` · ${sub.count} blob${sub.count === 1 ? "" : "s"}` : ""}</span>
             </span>
-            <span class="expand-side">${esc(formatTs(d.enrolled_at))}</span>
+            <span class="expand-side" title="${esc(sideTitle)}">${esc(formatTsShort(sideTs))}</span>
             <span class="expand-status">${status}</span>
             <span class="expand-actions">
               <button type="button" class="sm" data-c-ban-device="${esc(d.device_id)}" data-banned="${banned ? "0" : "1"}">
                 ${banned ? "Unban" : "Ban"}
+              </button>
+              <button type="button" class="sm ghost" data-c-rate-bypass="${esc(d.device_id)}" data-bypass="${d.rate_limit_bypass ? "0" : "1"}" title="Ignore company uploads-per-hour quota">
+                ${d.rate_limit_bypass ? "Enforce quota" : "Bypass quota"}
               </button>
             </span>
           </div>
           <div class="expand-detail">
             <dl class="detail-dl">
               ${fieldRow("Enrolled", formatTs(d.enrolled_at))}
+              ${fieldRow("Last submission", sub.lastAt ? formatTs(sub.lastAt) : "—")}
+              ${fieldRow("Submissions", String(sub.count))}
+              ${fieldRow("Last artefact", sub.lastArtefact || "—")}
+              ${fieldRow("Last seen", d.last_seen_at ? formatTs(d.last_seen_at) : "—")}
+              ${fieldRow("App version", d.app_version || "—")}
               ${fieldRowHtml("Device ID", deviceLink(d.device_id), d.device_id)}
               ${fieldRow("Case ID", d.case_id, true)}
               ${fieldRow("Email", d.email || "—")}
               ${fieldRow("Platform", d.platform || "—")}
               ${fieldRow("Model", d.model || "—")}
-              ${fieldRow("OS version", d.os_version || "—")}
+              ${fieldRow("OS / system", d.os_version || "—")}
+              ${fieldRow("Manufacturer", d.manufacturer || "—")}
+              ${fieldRow("Brand", d.brand || "—")}
+              ${fieldRow("Device name", d.device_name || "—")}
+              ${deviceDetailsRows(d)}
               ${fieldRow("Banned", banned ? "yes" : "no")}
+              ${fieldRow("Rate-limit bypass", d.rate_limit_bypass ? "yes" : "no")}
               ${fieldRow("Public key", d.public_key, true)}
               ${fieldRow("Noise fingerprint", d.noise_key_fingerprint || "—", !!d.noise_key_fingerprint)}
             </dl>
@@ -5208,6 +6384,24 @@
               body: JSON.stringify({ banned }),
             });
             toast(banned ? "Device banned" : "Device unbanned");
+            if (state.selectedCompanyId) openCompanyDetail(state.selectedCompanyId);
+            refresh();
+          } catch (e) {
+            toast(String(e.message || e), true);
+          }
+        });
+      });
+      host.querySelectorAll("[data-c-rate-bypass]").forEach((btn) => {
+        btn.addEventListener("click", async (ev) => {
+          ev.stopPropagation();
+          const deviceId = btn.getAttribute("data-c-rate-bypass");
+          const bypass = btn.getAttribute("data-bypass") === "1";
+          try {
+            await api(`/v1/admin/devices/${deviceId}/rate-limit-bypass`, {
+              method: "POST",
+              body: JSON.stringify({ bypass }),
+            });
+            toast(bypass ? "Device can bypass upload quota" : "Device quota enforced again");
             if (state.selectedCompanyId) openCompanyDetail(state.selectedCompanyId);
             refresh();
           } catch (e) {
@@ -5356,6 +6550,18 @@
           f.name.value = c.name || "";
           f.case_id.value = c.case_id || "";
           f.domains.value = (c.domains || []).join(", ");
+          if (f.max_devices_per_email) {
+            f.max_devices_per_email.value =
+              c.max_devices_per_email === 0 || c.max_devices_per_email
+                ? String(c.max_devices_per_email)
+                : "1";
+          }
+          if (f.device_uploads_per_hour) {
+            f.device_uploads_per_hour.value =
+              c.device_uploads_per_hour === 0 || c.device_uploads_per_hour
+                ? String(c.device_uploads_per_hour)
+                : "10";
+          }
           f.color.value = normalizeCompanyHex(c.color, companyColor(c.id));
           syncCompanyColorInputs(f);
         }
@@ -5402,13 +6608,14 @@
         if ($("company-builds")) {
           if (builds.length) {
             $("company-builds").innerHTML = wrapTable(`<table>
-                <thead><tr><th>File</th><th>Brand ver</th><th>App ver</th><th>Platform</th><th>Size</th><th></th></tr></thead>
+                <thead><tr><th>File</th><th>Brand ver</th><th>App ver</th><th>Platform</th><th>Size</th><th>Generated</th><th></th></tr></thead>
                 <tbody>${builds.map((b) => `<tr>
                   <td class="mono">${esc(b.name)}</td>
                   <td class="mono">${esc(b.branding_version || "—")}</td>
                   <td class="mono">${esc(b.version || "—")}</td>
                   <td><span class="pill">${esc(b.platform || "—")}</span></td>
                   <td class="mono">${esc(formatBytes(b.size, { compact: true }))}</td>
+                  <td class="mono" title="${esc(b.generated_at || b.modified_at || "")}">${esc(formatTs(b.generated_at || b.modified_at))}</td>
                   <td>
                     <div class="split-actions">
                       <button type="button" class="primary sm company-build-dl"
@@ -5458,18 +6665,37 @@
             loadBranding().then(() => loadMobileBuilds());
           });
         }
-        const events = data.enrollment_events || [];
+        const events = (data.audit && data.audit.length)
+          ? data.audit
+          : (data.enrollment_events || []);
         if ($("company-enroll-log")) {
           $("company-enroll-log").innerHTML = events.length
             ? wrapTable(`<table>
-                <thead><tr><th>When</th><th>Event</th><th>Email</th><th>Detail</th></tr></thead>
-                <tbody>${events.map((e) => `<tr>
+                <thead><tr><th>When</th><th>Event</th><th>Who</th><th>Remote</th><th>Detail</th></tr></thead>
+                <tbody>${events.map((e) => {
+                  const who = e.email || e.lab_key
+                    || (e.device_id ? short(e.device_id, 12) : "")
+                    || (e.source === "access" && e.event?.startsWith("blob_") ? "admin/lab" : "")
+                    || "—";
+                  const remote = e.remote
+                    ? `<span class="access-ip" title="Remote IP">${esc(e.remote)}</span>`
+                    : "—";
+                  const deviceBit = e.device_id
+                    ? ` · <a class="xlink" href="#devices/${esc(e.device_id)}" data-nav-tab="devices" data-nav-id="${esc(e.device_id)}">${esc(short(e.device_id, 10))}</a>`
+                    : "";
+                  const resourceBit = e.resource_id && e.resource_id !== "_list_" && String(e.event || "").startsWith("blob_")
+                    ? ` · <a class="xlink" href="#blobs/${esc(e.resource_id)}" data-nav-tab="blobs" data-nav-id="${esc(e.resource_id)}">${esc(short(e.resource_id, 10))}</a>`
+                    : "";
+                  return `<tr>
                   <td class="mono">${esc(formatTs(e.ts))}</td>
-                  <td><span class="pill accent">${esc(e.event)}</span></td>
-                  <td class="mono">${esc(e.email || e.lab_key || "—")}</td>
-                  <td class="mono">${esc(short(e.detail || "", 48))}</td>
-                </tr>`).join("")}</tbody></table>`)
-            : emptyHtml("No enrollment events for this company yet.");
+                  <td>${enrollEventPill(e.event, e.detail)}</td>
+                  <td class="mono">${esc(who)}${deviceBit}</td>
+                  <td class="mono">${remote}</td>
+                  <td class="mono" title="${esc(e.detail || e.path || "")}">${esc(short(e.detail || e.path || "—", 56))}${resourceBit}</td>
+                </tr>`;
+                }).join("")}</tbody></table>`)
+            : emptyHtml("No enrollment or upload events for this company yet.");
+          wireNavLinks($("company-enroll-log"));
         }
       } catch (e) {
         toast(String(e.message || e), true);
@@ -5562,13 +6788,41 @@
       view.innerHTML = filtered.map((l) => {
         const lvl = (l.level || "INFO").toUpperCase();
         const tgt = l.target ? `<span class="tgt">${esc(l.target)}:</span>` : "";
-        const msg = highlightMsg(l.message || l.raw || "", q);
+        const rawMsg = l.message || l.raw || "";
+        const ipMatch = String(rawMsg).match(/\bremote=([^\s]+)/i);
+        const ip = ipMatch ? ipMatch[1] : "";
+        const deviceIdMatch = String(rawMsg).match(/\bdevice=([0-9a-fA-F-]{8,})/);
+        const deviceId = deviceIdMatch ? deviceIdMatch[1] : "";
+        const whoMatch = String(rawMsg).match(/\bwho=([^\s]+)/i);
+        const infoMatch = String(rawMsg).match(/\bdevice_info=([^\s]+)/i);
+        let plat = "";
+        let model = "";
+        if (infoMatch) {
+          const bits = String(infoMatch[1]).split("/");
+          plat = bits[0] === "-" ? "" : (bits[0] || "");
+          model = bits[1] === "-" ? "" : (bits[1] || "");
+        }
+        let deviceLabel = "";
+        if (deviceId) {
+          deviceLabel = deviceLogLabel(deviceId, plat, model);
+          if (whoMatch && (!knownDevice(deviceId))) {
+            // Fall back to server-provided who= when devices cache is empty.
+            deviceLabel = String(whoMatch[1]).replace(/_/g, " ") + ` (${short(deviceId, 10)})`;
+          }
+        }
+        const msg = highlightMsg(rawMsg, q);
         const src = (l.source || "?").toLowerCase();
+        const ipBadge = ip
+          ? `<span class="log-ip" title="Remote IP">${esc(ip)}</span>`
+          : "";
+        const deviceBadge = deviceLabel
+          ? `<span class="log-device" title="Device ${esc(deviceId)}">${esc(deviceLabel)}</span>`
+          : "";
         return `<div class="log-line lvl-${esc(lvl)}">
           <span class="ts">${esc(formatTs(l.ts) || "—")}</span>
           <span class="src src-${esc(src)}">${esc(l.source || "?")}</span>
           <span class="lvl">${esc(lvl)}</span>
-          <span class="msg">${tgt}${msg}</span>
+          <span class="msg">${ipBadge}${deviceBadge}${tgt}${msg}</span>
         </div>`;
       }).join("");
 
@@ -5736,15 +6990,18 @@
               ${fieldRow("Device public key", j.device_public_key, true)}
               ${j.error ? fieldRow("Error", j.error) : ""}
             </dl>
+            ${j.artefact === "message_report" && blobId ? messageReportPreviewCardHtml(blobId) : ""}
           </div>
         </div>`;
       }).join("")}</div>`;
       wireExpandList($("jobs"));
       wireNavLinks($("jobs"));
+      kickMessageReportPreviews($("jobs"));
     }
 
     const ACCESS_KIND_LABELS = {
       blob_download: "Blob download",
+      blob_preview: "Blob preview",
       blob_get: "Blob meta",
       blob_list: "Blob list",
       blob_delete: "Blob delete",
@@ -5777,6 +7034,25 @@
       return "";
     }
 
+    function accessIsAdmin(e) {
+      return !!(e && (e.is_admin === true || e.is_admin === 1 || e.is_admin === "1"));
+    }
+
+    function accessActorLabel(e) {
+      if (accessIsAdmin(e)) {
+        const u = String(e.admin_user || "").trim();
+        return u ? `Admin (${u})` : "Admin";
+      }
+      return "Client";
+    }
+
+    function accessActorPill(e) {
+      if (accessIsAdmin(e)) {
+        return `<span class="pill warn" title="${esc(accessActorLabel(e))}">${esc(accessActorLabel(e))}</span>`;
+      }
+      return `<span class="pill muted">Client</span>`;
+    }
+
     function accessMatchesStatus(e, statusFilter) {
       const s = Number(e.status) || 0;
       if (!statusFilter) return true;
@@ -5784,6 +7060,14 @@
       if (statusFilter === "4xx") return s >= 400 && s < 500;
       if (statusFilter === "5xx") return s >= 500;
       if (statusFilter === "err") return s >= 400;
+      return true;
+    }
+
+    function accessMatchesActor(e, actorFilter) {
+      if (!actorFilter) return true;
+      const admin = accessIsAdmin(e);
+      if (actorFilter === "admin") return admin;
+      if (actorFilter === "client") return !admin;
       return true;
     }
 
@@ -5829,6 +7113,7 @@
       const kind = $("access-kind")?.value || "";
       const remote = $("access-remote")?.value || "";
       const status = $("access-status")?.value || state.filter.accessStatus || "";
+      const actor = $("access-actor")?.value || "";
       const q = state.filter.access || "";
       if (kind) chips.push({ key: "kind", label: accessKindLabel(kind) });
       if (remote) chips.push({ key: "remote", label: remote });
@@ -5836,6 +7121,7 @@
         const statusLabels = { ok: "2xx / 3xx", "4xx": "4xx", "5xx": "5xx", err: "errors" };
         chips.push({ key: "status", label: statusLabels[status] || status });
       }
+      if (actor) chips.push({ key: "actor", label: actor === "admin" ? "Admin" : "Client" });
       if (q) chips.push({ key: "q", label: `“${q}”` });
       if (!chips.length) {
         host.hidden = true;
@@ -5855,6 +7141,7 @@
             if ($("access-status")) $("access-status").value = "";
             state.filter.accessStatus = "";
           }
+          if (key === "actor" && $("access-actor")) $("access-actor").value = "";
           if (key === "q") {
             state.filter.access = "";
             if ($("search-access")) $("search-access").value = "";
@@ -5885,11 +7172,17 @@
     function filteredAccessEvents(events) {
       const q = state.filter.access;
       const statusFilter = $("access-status")?.value || state.filter.accessStatus || "";
+      const actorFilter = $("access-actor")?.value || "";
       return (events || []).filter((e) => {
         if (!accessMatchesStatus(e, statusFilter)) return false;
+        if (!accessMatchesActor(e, actorFilter)) return false;
         if (!q) return true;
         return matchesFilter(
-          [e.ts, e.method, e.path, e.kind, accessKindLabel(e.kind), e.remote, e.device_id, e.resource_id, e.status, e.user_agent].join(" "),
+          [
+            e.ts, e.method, e.path, e.kind, accessKindLabel(e.kind), e.remote,
+            e.device_id, e.resource_id, e.status, e.user_agent, e.app_version, e.platform, e.model, e.os_version,
+            accessActorLabel(e), e.admin_user, accessIsAdmin(e) ? "admin" : "client",
+          ].join(" "),
           q
         );
       });
@@ -5908,6 +7201,8 @@
       const sample = events || [];
       const errN = sample.filter((e) => Number(e.status) >= 400).length;
       const slowN = sample.filter((e) => Number(e.duration_ms) >= 500).length;
+      const adminN = sample.filter((e) => accessIsAdmin(e)).length;
+      const clientN = sample.length - adminN;
       const avgMs = sample.length
         ? Math.round(sample.reduce((a, e) => a + (Number(e.duration_ms) || 0), 0) / sample.length)
         : 0;
@@ -5917,19 +7212,29 @@
       $("access-stats-grid").innerHTML = [
         ["Total", stats?.total ?? 0],
         ["In sample", sample.length],
+        ["Admin", adminN],
+        ["Client", clientN],
         ["Errors", errN],
         ["Avg ms", avgMs],
         ["Downloads", downloads],
         ["Uploads", uploads],
-        ["Remotes", remotes.length],
-        ["Blobs", blobAccess.length],
       ].map(([l, n]) =>
         `<div class="stat"><div class="n">${esc(n)}</div><div class="l">${esc(l)}</div></div>`
       ).join("");
 
       const last = sample[0];
       const metaBits = [];
-      if (last) metaBits.push(`Latest <span class="mono">${esc(formatTs(last.ts))}</span> · ${esc(accessKindLabel(last.kind))} · ${esc(last.method)} ${esc(short(last.path, 48))}`);
+      if (last) {
+        const lastDevice = last.device_id
+          ? deviceLogLabel(last.device_id, last.platform, last.model)
+          : "";
+        metaBits.push(
+          `Latest <span class="mono">${esc(formatTs(last.ts))}</span>` +
+          (last.remote ? ` · <span class="access-ip" title="Remote IP">${esc(last.remote)}</span>` : "") +
+          (lastDevice ? ` · <span class="access-device" title="Device ${esc(last.device_id)}">${esc(lastDevice)}</span>` : "") +
+          ` · ${esc(accessKindLabel(last.kind))} · ${esc(last.method)} ${esc(short(last.path, 48))}`
+        );
+      }
       if (slowN) metaBits.push(`<span class="mono">${esc(slowN)}</span> ≥500ms in sample`);
       if (errN) metaBits.push(`<span class="mono">${esc(errN)}</span> error${errN === 1 ? "" : "s"} in sample`);
       if ($("access-meta")) {
@@ -6023,7 +7328,7 @@
       }
       $("access-events").innerHTML = `<div class="expand-list">
         <div class="expand-list-head access-head" aria-hidden="true">
-          <span></span><span>Request</span><span>Remote</span><span>Status</span><span>ms</span><span>When</span>
+          <span></span><span>Request</span><span>Actor</span><span>Remote</span><span>Status</span><span>ms</span><span>When</span>
         </div>
         ${list.map((e, i) => {
         const key = expandKey("access", `${e.ts}-${e.method}-${e.path}-${i}`);
@@ -6043,9 +7348,10 @@
             <span class="expand-chevron">▸</span>
             <span class="expand-main">
               <span class="label"><span class="access-kind-pill">${esc(accessKindLabel(e.kind))}</span> · ${esc(e.method)} ${esc(short(e.path, 48))}</span>
-              <span class="meta">${e.device_id ? `device ${esc(short(e.device_id, 12))}` : "no device"}${e.resource_id ? ` · ${esc(short(e.resource_id, 14))}` : ""}${e.user_agent ? ` · ${esc(short(e.user_agent, 28))}` : ""}</span>
+              <span class="meta">${e.remote ? `<span class="access-ip" title="Remote IP">${esc(e.remote)}</span>` : ""}${e.device_id ? `<span class="access-device" title="Device ${esc(e.device_id)}">${esc(deviceLogLabel(e.device_id, e.platform, e.model))}</span>` : "no device"}${e.app_version ? ` · app ${esc(e.app_version)}` : ""}${e.platform || e.model ? ` · ${esc([e.platform, e.model].filter(Boolean).join(" / "))}` : ""}${e.resource_id ? ` · ${esc(short(e.resource_id, 14))}` : ""}${e.user_agent ? ` · ${esc(short(e.user_agent, 28))}` : ""}</span>
             </span>
-            <span class="expand-remote mono" title="${esc(e.remote || "")}">${esc(short(e.remote || "—", 18))}</span>
+            <span class="expand-actor">${accessActorPill(e)}</span>
+            <span class="expand-remote mono" title="${esc([e.remote, e.device_id ? deviceLogLabel(e.device_id, e.platform, e.model) : ""].filter(Boolean).join(" · "))}">${esc(e.remote || "—")}${e.device_id ? `<span class="access-device" title="Device ${esc(e.device_id)}">${esc(deviceLogLabel(e.device_id, e.platform, e.model))}</span>` : ""}</span>
             <span class="expand-status"><span class="pill ${tone}">${esc(e.status)}</span></span>
             <span class="expand-actions"><span class="mono" style="font-size:0.72rem;color:var(--ink-faint)">${esc(e.duration_ms)}</span></span>
             <span class="expand-side" title="${esc(formatTs(e.ts))}">${esc(formatTsShort(e.ts))}</span>
@@ -6053,6 +7359,7 @@
           <div class="expand-detail">
             <dl class="detail-dl">
               ${fieldRow("When", formatTs(e.ts))}
+              ${fieldRow("Actor", accessActorLabel(e))}
               ${fieldRow("Kind", `${accessKindLabel(e.kind)} (${e.kind || "other"})`)}
               ${fieldRow("Method", e.method)}
               ${fieldRow("Path", e.path, true)}
@@ -6063,6 +7370,10 @@
               ${isBlob
                 ? fieldRowHtml("Blob", blobLink(e.resource_id), e.resource_id)
                 : fieldRow("Resource", e.resource_id || "—", !!e.resource_id)}
+              ${fieldRow("App version", e.app_version || "—")}
+              ${fieldRow("Platform", e.platform || "—")}
+              ${fieldRow("Model", e.model || "—")}
+              ${fieldRow("OS version", e.os_version || "—")}
               ${fieldRow("User-Agent", e.user_agent || "—")}
             </dl>
             ${actions.length ? `<div class="row-actions" style="margin-top:0.65rem">${actions.join("")}</div>` : ""}
@@ -6181,11 +7492,12 @@
             <span class="expand-status">${dlPill}</span>
             <span class="expand-actions">
               ${u.device_id ? `<a class="btn sm" href="#devices/${esc(u.device_id)}" data-nav-tab="devices" data-nav-id="${esc(u.device_id)}">Device</a>` : ""}
-              <a class="btn sm" href="/v1/admin/blobs/${esc(b.blob_id)}/content" target="_blank" rel="noreferrer">Download</a>
+              <a class="btn sm" href="/v1/admin/blobs/${esc(b.blob_id)}/content" download target="_blank" rel="noreferrer">Download</a>
               <button type="button" class="sm danger" data-del-blob="${esc(b.blob_id)}">Delete</button>
             </span>
           </div>
           <div class="expand-detail">
+            ${b.artefact === "message_report" ? messageReportPreviewCardHtml(b.blob_id) : ""}
             <div class="grid-2" style="margin-top:0.75rem">
               <div class="card" style="margin:0">
                 <div class="card-title"><h3>Uploaded by</h3><span class="hint">device that completed upload</span></div>
@@ -6215,7 +7527,7 @@
                       </tr>`).join("")}</tbody></table>`)
                   : emptyHtml("Nobody has downloaded this blob yet.")}
                 ${otherAccess.length
-                  ? `<div class="card-title" style="margin-top:0.85rem"><h3>Other access</h3><span class="hint">meta / delete</span></div>
+                  ? `<div class="card-title" style="margin-top:0.85rem"><h3>Other access</h3><span class="hint">preview / meta / delete</span></div>
                      ${wrapTable(`<table>
                        <thead><tr><th>When</th><th>Kind</th><th>Remote</th><th>Status</th></tr></thead>
                        <tbody>${otherAccess.slice(0, 12).map((e) => `<tr>
@@ -6260,6 +7572,194 @@
           }
         });
       });
+      kickMessageReportPreviews($("blobs"));
+    }
+
+    function messageReportPreviewCardHtml(blobId) {
+      if (!blobId) return "";
+      return `<div class="card msg-preview-card" style="margin-top:0.85rem" data-msg-preview="${esc(blobId)}">
+        <div class="card-title"><h3>Reported message</h3><span class="hint">message text and attached screenshots</span></div>
+        <div class="msg-preview-body"><p class="meta-line">Loading message and images…</p></div>
+      </div>`;
+    }
+
+    function kickMessageReportPreviews(root) {
+      root?.querySelectorAll(".expand-row.open [data-msg-preview]").forEach((el) => {
+        const id = el.getAttribute("data-msg-preview");
+        if (id) loadMessageReportPreview(el, id);
+      });
+    }
+
+    function sniffImageMimeFromBase64(b64) {
+      try {
+        const bin = atob(b64.slice(0, 32));
+        const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+        if (bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg";
+        if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+          return "image/png";
+        }
+        if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return "image/gif";
+        if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46) {
+          return "image/webp";
+        }
+      } catch (_) { /* ignore */ }
+      return "";
+    }
+
+    function normalizeAttachmentBase64(raw) {
+      let s = String(raw || "").trim();
+      if (!s) return "";
+      const dataUrl = /^data:([^;,]+);base64,(.+)$/i.exec(s);
+      if (dataUrl) s = dataUrl[2];
+      return s.replace(/\s+/g, "");
+    }
+
+    function messageReportAttachments(data) {
+      const names = [];
+      const images = [];
+      const raw = Array.isArray(data?.attachments) ? data.attachments : [];
+      for (const a of raw) {
+        if (a && typeof a === "object") {
+          const name = String(a.name || a.filename || "image").trim() || "image";
+          const b64 = normalizeAttachmentBase64(
+            a.data_base64 || a.base64 || a.data || a.content_base64 || "",
+          );
+          let mime = String(a.mime || a.content_type || a.media_type || "").trim();
+          if (b64) {
+            if (!mime || mime === "application/octet-stream" || mime === "image/heic" || mime === "image/heif") {
+              mime = sniffImageMimeFromBase64(b64) || (mime.startsWith("image/") ? mime : "image/jpeg");
+            }
+            // Browsers often cannot render HEIC; still try jpeg/png sniff first.
+            if (mime === "image/heic" || mime === "image/heif") {
+              names.push(`${name} (HEIC — open Download to inspect)`);
+            } else {
+              images.push({ name, mime, b64 });
+            }
+          } else {
+            names.push(name);
+          }
+        } else {
+          const s = String(a || "").trim();
+          if (s) names.push(s);
+        }
+      }
+      return { names, images };
+    }
+
+    function openMessageImageLightbox(src, name) {
+      document.querySelector(".msg-preview-lightbox")?.remove();
+      const overlay = document.createElement("div");
+      overlay.className = "msg-preview-lightbox";
+      const img = document.createElement("img");
+      img.src = src;
+      img.alt = name || "screenshot";
+      overlay.appendChild(img);
+      const close = () => {
+        overlay.remove();
+        window.removeEventListener("keydown", onKey);
+      };
+      const onKey = (ev) => {
+        if (ev.key === "Escape") close();
+      };
+      overlay.addEventListener("click", close);
+      window.addEventListener("keydown", onKey);
+      document.body.appendChild(overlay);
+    }
+
+    function wireMessagePreviewImages(root) {
+      root?.querySelectorAll("[data-msg-img]").forEach((img) => {
+        img.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          openMessageImageLightbox(img.getAttribute("src") || "", img.getAttribute("alt") || "");
+        });
+      });
+    }
+
+    function renderMessageReportPreview(data) {
+      if (!data || typeof data !== "object") {
+        return {
+          html: `<p class="meta-line">Not a JSON message report (binary or encrypted payload).</p>`,
+          images: [],
+        };
+      }
+      const channel = String(data.channel || "").trim();
+      const sender = String(data.sender || "").trim();
+      const body = String(data.body_text || "").trim();
+      const note = String(data.user_note || "").trim();
+      const urls = Array.isArray(data.detected_urls)
+        ? data.detected_urls.map((u) => String(u || "").trim()).filter(Boolean)
+        : [];
+      const { names: attachments, images } = messageReportAttachments(data);
+      const reported = data.reported_at ? formatTs(data.reported_at) : "";
+      const flags = [
+        data.clicked_link ? "clicked a link" : "",
+        data.replied ? "replied" : "",
+      ].filter(Boolean);
+      const bits = [];
+      if (channel || sender) {
+        bits.push(`<div class="msg-preview-head"><strong>${esc(channel || "message")}</strong>${sender ? ` · ${esc(sender)}` : ""}</div>`);
+      }
+      if (reported) bits.push(`<p class="meta-line">Reported ${esc(reported)}</p>`);
+      if (flags.length) bits.push(`<p class="meta-line">${esc(flags.join(" · "))}</p>`);
+      if (body) bits.push(`<pre class="msg-preview-body-text">${esc(body)}</pre>`);
+      if (note) bits.push(`<p class="meta-line"><strong>Note</strong> · ${esc(note)}</p>`);
+      if (urls.length) {
+        bits.push(`<ul class="msg-preview-urls">${urls.map((u) => `<li class="mono">${esc(u)}</li>`).join("")}</ul>`);
+      }
+      if (images.length) {
+        bits.push(`<div class="msg-preview-images-title">Screenshots (${images.length})</div>`);
+        bits.push(`<div class="msg-preview-images">${images.map((img, i) => `<figure>
+            <img data-msg-img data-msg-img-idx="${i}" alt="${esc(img.name)}" loading="lazy" />
+            <figcaption title="${esc(img.name)}">${esc(img.name)}</figcaption>
+          </figure>`).join("")}</div>`);
+      }
+      if (attachments.length) {
+        bits.push(`<p class="meta-line">${esc(attachments.length)} attachment(s) without previewable image bytes: ${esc(attachments.join(", "))}</p>`);
+      }
+      if (!images.length && !attachments.length && Array.isArray(data.attachments) && data.attachments.length) {
+        bits.push(`<p class="meta-line">Attachments were listed but no image payload was embedded.</p>`);
+      }
+      if (!bits.length) {
+        return {
+          html: `<p class="meta-line">Empty message report.</p><pre class="msg-preview-body-text">${esc(JSON.stringify(data, null, 2))}</pre>`,
+          images: [],
+        };
+      }
+      return { html: bits.join(""), images };
+    }
+
+    async function loadMessageReportPreview(host, blobId) {
+      const body = host.querySelector(".msg-preview-body");
+      if (!body || host.dataset.loaded === "1" || host.dataset.loading === "1") return;
+      host.dataset.loading = "1";
+      try {
+        // preview=1 → access kind blob_preview (does not count as a download).
+        const res = await fetch(
+          `/v1/admin/blobs/${encodeURIComponent(blobId)}/content?preview=1`,
+          { credentials: "same-origin", cache: "no-store" },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const buf = await res.arrayBuffer();
+        let text = new TextDecoder("utf-8", { fatal: false }).decode(buf);
+        if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+        let data = null;
+        try { data = JSON.parse(text); } catch { /* binary */ }
+        const rendered = renderMessageReportPreview(data);
+        body.innerHTML = rendered.html;
+        body.querySelectorAll("[data-msg-img-idx]").forEach((img) => {
+          const i = Number(img.getAttribute("data-msg-img-idx"));
+          const item = rendered.images[i];
+          if (!item) return;
+          img.src = `data:${item.mime};base64,${item.b64}`;
+        });
+        wireMessagePreviewImages(body);
+        host.dataset.loaded = "1";
+      } catch (e) {
+        body.innerHTML = `<p class="meta-line" style="color:var(--bad)">Could not load preview: ${esc(String(e.message || e))}</p>`;
+      } finally {
+        delete host.dataset.loading;
+      }
     }
 
     function refilterFromCache() {
@@ -6281,7 +7781,7 @@
 
     state.serviceProbe = {
       health: { state: "checking", label: "Checking…", meta: "Probing /healthz…", body: "" },
-      api: { state: "checking", label: "Checking…", meta: "Probing /v1/status…", data: null },
+      api: { state: "checking", label: "Checking…", meta: "Probing /v1/admin/status…", data: null },
       checkedAt: null,
     };
 
@@ -6321,7 +7821,7 @@
         const when = probe.checkedAt
           ? `Checked ${new Date(probe.checkedAt).toLocaleTimeString()}`
           : "Live probe";
-        $("svc-subtitle").textContent = `${when} · /healthz + /v1/status`;
+        $("svc-subtitle").textContent = `${when} · /healthz + /v1/admin/status`;
       }
 
       const data = probe.api?.data;
@@ -6330,6 +7830,7 @@
         if (!data) {
           kpis.innerHTML = "";
         } else {
+          const bw = data.bandwidth || {};
           const rows = [
             ["Version", data.version || "—"],
             ["Uptime", formatUptime(data.uptime_secs)],
@@ -6341,6 +7842,8 @@
             ["Lab keys", data.lab_keys ?? 0],
             ["Banned", data.banned_keys ?? 0],
             ["Access", data.access_total ?? 0],
+            ["RX", `${formatRate(bw.rx_bps ?? 0)} · ${formatBytes(bw.rx_total ?? 0, { compact: true })}`],
+            ["TX", `${formatRate(bw.tx_bps ?? 0)} · ${formatBytes(bw.tx_total ?? 0, { compact: true })}`],
           ];
           kpis.innerHTML = rows.map(([l, n]) =>
             `<div class="svc-kpi"><div class="n">${esc(n)}</div><div class="l">${esc(l)}</div></div>`
@@ -6365,6 +7868,7 @@
             ["Lab seal", s.lab_seal ? "on" : "off"],
             ["Allow CMDEV", s.allow_dev_envelope ? "on" : "off"],
             ["Reveal OTP", s.lab_reveal_otp ? "on" : "off"],
+            ["OTP webhook", s.otp_delivery_webhook_url ? s.otp_delivery_webhook_url : "off"],
             ["Data dir", s.data_dir],
           ];
           settingsDl.innerHTML = rows.map(([k, v]) =>
@@ -6404,7 +7908,7 @@
       setStatusIcon("status-health", "checking", "Health: checking… · click for details");
       setStatusIcon("status-api", "checking", "Status API: checking… · click for details");
       state.serviceProbe.health = { state: "checking", label: "Checking…", meta: "Probing /healthz…", body: "" };
-      state.serviceProbe.api = { state: "checking", label: "Checking…", meta: "Probing /v1/status…", data: null };
+      state.serviceProbe.api = { state: "checking", label: "Checking…", meta: "Probing /v1/admin/status…", data: null };
       if (updateOverlay || $("svc-overlay")?.classList.contains("show")) renderServiceOverlay();
 
       const healthP = fetch("/healthz", { cache: "no-store" })
@@ -6443,13 +7947,13 @@
           setStatusIcon("status-health", "err", `Health: unreachable · click for details`);
         });
 
-      const statusP = fetch("/v1/status", { cache: "no-store", credentials: "same-origin" })
+      const statusP = fetch("/v1/admin/status", { cache: "no-store", credentials: "same-origin" })
         .then(async (r) => {
           if (!r.ok) {
             state.serviceProbe.api = {
               state: "err",
               label: "Error",
-              meta: `HTTP ${r.status} · /v1/status`,
+              meta: `HTTP ${r.status} · /v1/admin/status`,
               data: null,
             };
             setStatusIcon("status-api", "err", `Status API: HTTP ${r.status} · click for details`);
@@ -6469,7 +7973,7 @@
               state.serviceProbe.api = {
                 state: "warn",
                 label: "OK · jobs pending",
-                meta: `${bits.join(" · ")} · ${pending} pending · /v1/status`,
+                meta: `${bits.join(" · ")} · ${pending} pending · /v1/admin/status`,
                 data,
               };
               setStatusIcon("status-api", "warn", `Status API: ${pending} jobs pending · click for details`);
@@ -6477,7 +7981,7 @@
               state.serviceProbe.api = {
                 state: "ok",
                 label: "Operational",
-                meta: `${bits.join(" · ")} · /v1/status`,
+                meta: `${bits.join(" · ")} · /v1/admin/status`,
                 data,
               };
               setStatusIcon("status-api", "ok", `Status API: ok · click for details`);
@@ -6486,7 +7990,7 @@
             state.serviceProbe.api = {
               state: "err",
               label: "Not ok",
-              meta: "/v1/status returned ok=false",
+              meta: "/v1/admin/status returned ok=false",
               data,
             };
             setStatusIcon("status-api", "err", "Status API: not ok · click for details");
@@ -6536,6 +8040,9 @@
         ]);
 
         const enrollEvents = enrollLog.events || overview.recent_enrollment || [];
+        // Keep the open company detail — a full cache replace used to drop it and
+        // break "Save lab key" / "Mint token" with "Open a company first".
+        const keepCompanyDetail = state.cache.companyDetail;
         state.cache = {
           ready: true,
           devices: devices.devices || [],
@@ -6548,6 +8055,7 @@
           labKeys: labKeys.lab_keys || [],
           enrollEvents,
           banned: keys.banned || [],
+          companyDetail: keepCompanyDetail,
         };
         state.accessStats = accessStats;
 
@@ -6572,6 +8080,9 @@
         // Keep process logs fresh on the global refresh too when Logs tab is open
         if (document.querySelector('.panel.active[data-panel="logs"]') || !state.logLines.length) {
           refreshLogs();
+        }
+        if (document.querySelector('.panel.active[data-panel="settings"]')) {
+          refreshStorage();
         }
 
         badge.classList.toggle("paused", state.paused);
@@ -6668,6 +8179,9 @@
     $("access-kind")?.addEventListener("change", () => refreshAccess());
     $("access-remote")?.addEventListener("change", () => refreshAccess());
     $("access-limit")?.addEventListener("change", () => refreshAccess());
+    $("access-actor")?.addEventListener("change", () => {
+      renderAccess(state.accessStats, state.cache.accessEvents || []);
+    });
     $("access-status")?.addEventListener("change", () => {
       state.filter.accessStatus = $("access-status")?.value || "";
       renderAccess(state.accessStats, state.cache.accessEvents || []);
@@ -6676,6 +8190,7 @@
       if ($("access-kind")) $("access-kind").value = "";
       if ($("access-remote")) $("access-remote").value = "";
       if ($("access-status")) $("access-status").value = "";
+      if ($("access-actor")) $("access-actor").value = "";
       if ($("search-access")) $("search-access").value = "";
       state.filter.access = "";
       state.filter.accessStatus = "";
@@ -6688,9 +8203,21 @@
         return;
       }
       const lines = [
-        ["ts", "kind", "method", "path", "status", "duration_ms", "remote", "device_id", "resource_id"].join("\t"),
+        ["ts", "actor", "admin_user", "kind", "method", "path", "status", "duration_ms", "remote", "device_id", "resource_id"].join("\t"),
         ...list.map((e) =>
-          [e.ts, e.kind, e.method, e.path, e.status, e.duration_ms, e.remote, e.device_id || "", e.resource_id || ""].join("\t")
+          [
+            e.ts,
+            accessIsAdmin(e) ? "admin" : "client",
+            e.admin_user || "",
+            e.kind,
+            e.method,
+            e.path,
+            e.status,
+            e.duration_ms,
+            e.remote,
+            e.device_id || "",
+            e.resource_id || "",
+          ].join("\t")
         ),
       ];
       try {
@@ -7065,6 +8592,8 @@
         const domains = f.domains.value.split(",").map((s) => s.trim()).filter(Boolean);
         const id = f.id.value.trim().toLowerCase();
         const color = normalizeCompanyHex(f.color?.value, "") || defaultCompanyColor(id);
+        const maxDevices = Math.max(0, Math.min(1000, Number(f.max_devices_per_email?.value ?? 1) || 0));
+        const uploadsPerHour = Math.max(0, Math.min(10000, Number(f.device_uploads_per_hour?.value ?? 10) || 0));
         const res = await api("/v1/admin/companies", {
           method: "POST",
           body: JSON.stringify({
@@ -7074,6 +8603,8 @@
             case_id: "00000000-0000-4000-8000-000000000001",
             enabled: true,
             color,
+            max_devices_per_email: maxDevices,
+            device_uploads_per_hour: uploadsPerHour,
           }),
         });
         toast(`Created ${res.company?.name || f.id.value}`);
@@ -7096,6 +8627,8 @@
         const current = (state.cache.companies || []).find((c) => c.id === f.id.value)
           || { enabled: true, case_id: f.case_id.value };
         const color = normalizeCompanyHex(f.color?.value, "") || companyColor(f.id.value.trim());
+        const maxDevices = Math.max(0, Math.min(1000, Number(f.max_devices_per_email?.value ?? 1) || 0));
+        const uploadsPerHour = Math.max(0, Math.min(10000, Number(f.device_uploads_per_hour?.value ?? 10) || 0));
         await api("/v1/admin/companies", {
           method: "POST",
           body: JSON.stringify({
@@ -7105,6 +8638,8 @@
             case_id: f.case_id.value || current.case_id || "00000000-0000-4000-8000-000000000001",
             enabled: current.enabled !== false,
             color,
+            max_devices_per_email: maxDevices,
+            device_uploads_per_hour: uploadsPerHour,
           }),
         });
         toast("Company updated");
@@ -7115,18 +8650,38 @@
       }
     });
 
+    function resolveOpenCompany() {
+      const companyId =
+        state.selectedCompanyId ||
+        $("company-edit-form")?.id?.value?.trim() ||
+        "";
+      if (!companyId) return null;
+      const detail =
+        (state.cache.companyDetail?.company?.id === companyId
+          ? state.cache.companyDetail.company
+          : null) ||
+        (state.cache.companies || []).find((c) => c.id === companyId) ||
+        null;
+      if (!detail) return null;
+      const edit = $("company-edit-form");
+      return {
+        companyId,
+        case_id: detail.case_id || edit?.case_id?.value || "",
+        domains: detail.domains || [],
+        name: detail.name || companyId,
+      };
+    }
+
     $("company-labkey-form")?.addEventListener("submit", async (ev) => {
       ev.preventDefault();
-      const companyId = state.selectedCompanyId;
-      const detail = state.cache.companyDetail?.company;
-      if (!companyId || !detail) {
+      const open = resolveOpenCompany();
+      if (!open?.companyId) {
         toast("Open a company first", true);
         return;
       }
       const f = ev.target;
-      const domains = detail.domains || [];
       const email = f.email.value.trim()
-        || (domains[0] ? `lab@${domains[0]}` : "");
+        || (open.domains[0] ? `lab@${open.domains[0]}` : "");
       try {
         await api("/v1/admin/lab-keys", {
           method: "POST",
@@ -7134,15 +8689,15 @@
             key: f.key.value.trim(),
             label: f.label.value.trim(),
             email,
-            case_id: detail.case_id,
+            case_id: open.case_id || "00000000-0000-4000-8000-000000000001",
             reusable: true,
             enabled: true,
-            company_id: companyId,
+            company_id: open.companyId,
           }),
         });
         toast("Lab key saved for company");
         f.reset();
-        openCompanyDetail(companyId);
+        await openCompanyDetail(open.companyId);
         refresh();
       } catch (e) {
         toast(String(e.message || e), true);
@@ -7151,15 +8706,14 @@
 
     $("company-token-form")?.addEventListener("submit", async (ev) => {
       ev.preventDefault();
-      const companyId = state.selectedCompanyId;
-      const detail = state.cache.companyDetail?.company;
-      if (!companyId || !detail?.case_id) {
+      const open = resolveOpenCompany();
+      if (!open?.companyId || !open.case_id) {
         toast("Open a company first", true);
         return;
       }
       const f = ev.target;
       try {
-        const body = { case_id: detail.case_id };
+        const body = { case_id: open.case_id };
         const token = f.token.value.trim();
         if (token) body.token = token;
         await api("/v1/admin/tokens", {
@@ -7168,7 +8722,7 @@
         });
         toast("Token minted for company case");
         f.reset();
-        openCompanyDetail(companyId);
+        await openCompanyDetail(open.companyId);
         refresh();
       } catch (e) {
         toast(String(e.message || e), true);
@@ -7203,10 +8757,62 @@
           public_url: f.public_url.value,
           lab_seal: f.lab_seal.checked,
           allow_dev_envelope: f.allow_dev_envelope.checked,
+          otp_delivery_webhook_url: f.otp_delivery_webhook_url?.value?.trim() || "",
+          otp_delivery_webhook_token: f.otp_delivery_webhook_token?.value?.trim() || "",
         };
         const s = await api("/v1/admin/settings", { method: "PATCH", body: JSON.stringify(body) });
         fillSettings(s);
         toast("Settings saved");
+        refresh();
+      } catch (e) {
+        toast(String(e.message || e), true);
+      }
+    });
+    $("btn-storage-refresh")?.addEventListener("click", () => refreshStorage());
+    $("storage-wipe-form")?.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const f = ev.target;
+      const body = {
+        password: f.password.value,
+        confirm: f.confirm.value.trim(),
+        collected: !!f.collected.checked,
+        logs: !!f.logs.checked,
+        mobile_builds: !!f.mobile_builds.checked,
+        build_caches: !!f.build_caches.checked,
+        devices: !!f.devices.checked,
+      };
+      if (!body.collected && !body.logs && !body.mobile_builds && !body.build_caches && !body.devices) {
+        toast("Select at least one category", true);
+        return;
+      }
+      if (body.confirm !== "DELETE") {
+        toast('Type DELETE to confirm', true);
+        return;
+      }
+      const summary = [
+        body.collected && "collected evidence",
+        body.logs && "logs",
+        body.mobile_builds && "mobile builds",
+        body.build_caches && "build caches",
+        body.devices && "devices",
+      ].filter(Boolean).join(", ");
+      if (!window.confirm(`Permanently delete: ${summary}?\n\nThis cannot be undone.`)) {
+        return;
+      }
+      const meta = $("storage-wipe-meta");
+      try {
+        const report = await api("/v1/admin/storage/wipe", {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        f.password.value = "";
+        f.confirm.value = "";
+        const freed = Math.max(0, (report.bytes_before || 0) - (report.bytes_after || 0));
+        const msg = `Deleted ${(report.cleared || []).join(", ") || "selected data"}` +
+          (freed ? ` · freed ~${formatBytes(freed, { compact: true })}` : "");
+        if (meta) meta.textContent = msg;
+        toast(msg);
+        await refreshStorage();
         refresh();
       } catch (e) {
         toast(String(e.message || e), true);
@@ -7217,6 +8823,315 @@
     let lastBuildStatus = null;
     let selectedCompanyId = "_default";
     let selectedVersion = "1.0.0";
+    let brandingLocale = "en";
+    let i18nCatalog = { fr: {}, es: {} };
+    let copyI18nState = {};
+    let stringsI18nState = {};
+    let baseCopySnapshot = null;
+    let baseStringsSnapshot = null;
+    let i18nCatalogLoaded = false;
+
+    const LOCALE_LABELS = { en: "English", fr: "Français", es: "Español" };
+
+    function emptyCopyPayload() {
+      return {
+        home: {
+          headline: "", body: "", android_title: "", android_subtitle: "",
+          ios_title: "", ios_subtitle: "", message_title: "", message_subtitle: "",
+        },
+        consent: {
+          title: "", footer: "", checkbox: "", button: "",
+          disclosure_android: "", disclosure_ios: "", disclosure_message: "",
+        },
+        my_data: {
+          title: "", device_heading: "", artefacts_heading: "", empty: "", clear_button: "",
+        },
+        android_bugreport: { title: "", headline: "", body: "" },
+        ios_sysdiagnose: { title: "", headline: "", body: "" },
+        message_report: { title: "", lead: "", button: "" },
+        notifications: {
+          encrypting_title: "", uploading_title: "", uploading_progress_title: "",
+          complete_title: "", failed_title: "", complete_body: "", failed_body: "",
+        },
+      };
+    }
+
+    function emptyStringsPayload() {
+      return {
+        tagline: "",
+        enroll_lead: "",
+        otp_notification_subject: "",
+        otp_notification_body: "",
+      };
+    }
+
+    function deepMergeCopy(base, over) {
+      const out = emptyCopyPayload();
+      const src = over && typeof over === "object" ? over : {};
+      for (const section of Object.keys(out)) {
+        const bsec = (base && base[section]) || {};
+        const osec = src[section] || {};
+        for (const key of Object.keys(out[section])) {
+          const v = osec[key];
+          out[section][key] = (v == null || String(v).trim() === "")
+            ? ""
+            : String(v);
+        }
+        // keep unknown unused
+        void bsec;
+      }
+      return out;
+    }
+
+    function selectedLocales(form) {
+      const out = ["en"];
+      if (form?.loc_fr?.checked) out.push("fr");
+      if (form?.loc_es?.checked) out.push("es");
+      return out;
+    }
+
+    function setLocaleChecks(form, list) {
+      if (!form) return;
+      const set = new Set(Array.isArray(list) && list.length ? list : ["en", "fr", "es"]);
+      if (form.loc_en) form.loc_en.checked = true;
+      if (form.loc_fr) form.loc_fr.checked = set.has("fr");
+      if (form.loc_es) form.loc_es.checked = set.has("es");
+      syncLocaleEditorAvailability();
+      updateBuildLocalesHint();
+    }
+
+    function catalogLookup(lang, english) {
+      const key = String(english || "");
+      if (!key) return "";
+      return (i18nCatalog[lang] && i18nCatalog[lang][key]) || "";
+    }
+
+    function updateBuildLocalesHint() {
+      const f = $("branding-form");
+      const locales = selectedLocales(f);
+      const def = (f?.default_locale?.value || "en").trim() || "en";
+      const labels = locales.map((c) => LOCALE_LABELS[c] || c);
+      if ($("build-locales-hint")) {
+        $("build-locales-hint").textContent =
+          `Languages in this build: ${labels.join(", ")} · default ${LOCALE_LABELS[def] || def}`;
+      }
+    }
+
+    function syncLocaleEditorAvailability() {
+      const enabled = new Set(selectedLocales($("branding-form")));
+      $("locale-editor-bar")?.querySelectorAll("[data-branding-locale]").forEach((btn) => {
+        const code = btn.getAttribute("data-branding-locale");
+        const on = enabled.has(code);
+        btn.disabled = !on;
+        if (!on && brandingLocale === code) {
+          setBrandingLocale("en", { skipStash: true });
+        }
+      });
+      updateBuildLocalesHint();
+    }
+
+    function rawField(form, name) {
+      const el = fieldEl(form, name);
+      return el ? String(el.value ?? "") : "";
+    }
+
+    function readStringsFromForm(form) {
+      return {
+        tagline: rawField(form, "tagline"),
+        enroll_lead: rawField(form, "enroll_lead"),
+        otp_notification_subject: rawField(form, "otp_notification_subject"),
+        otp_notification_body: rawField(form, "otp_notification_body"),
+      };
+    }
+
+    function writeStringsToForm(form, strings, { placeholders = false, lang = "en" } = {}) {
+      if (!form) return;
+      const s = strings || emptyStringsPayload();
+      const base = baseStringsSnapshot || emptyStringsPayload();
+      const ph = (english) => (placeholders ? catalogLookup(lang, english) : "");
+      const set = (name, value, english) => {
+        const el = fieldEl(form, name);
+        if (!el) return;
+        if (document.activeElement === el) return;
+        el.value = value || "";
+        if (placeholders) el.placeholder = ph(english || base[name] || "") || el.placeholder || "";
+      };
+      set("tagline", s.tagline, base.tagline);
+      set("enroll_lead", s.enroll_lead, base.enroll_lead);
+      set("otp_notification_subject", s.otp_notification_subject, base.otp_notification_subject);
+      set("otp_notification_body", s.otp_notification_body, base.otp_notification_body);
+    }
+
+    function collectCopyPayloadRaw(form) {
+      const g = (name) => rawField(form, name);
+      return {
+        home: {
+          headline: g("home_headline"),
+          body: g("home_body"),
+          android_title: g("home_android_title"),
+          android_subtitle: g("home_android_subtitle"),
+          ios_title: g("home_ios_title"),
+          ios_subtitle: g("home_ios_subtitle"),
+          message_title: g("home_message_title"),
+          message_subtitle: g("home_message_subtitle"),
+        },
+        consent: {
+          title: g("consent_title"),
+          footer: g("consent_footer"),
+          checkbox: g("consent_checkbox"),
+          button: g("consent_button"),
+          disclosure_android: g("consent_disclosure_android"),
+          disclosure_ios: g("consent_disclosure_ios"),
+          disclosure_message: g("consent_disclosure_message"),
+        },
+        my_data: {
+          title: g("mydata_title"),
+          device_heading: g("mydata_device_heading"),
+          artefacts_heading: g("mydata_artefacts_heading"),
+          empty: g("mydata_empty"),
+          clear_button: g("mydata_clear_button"),
+        },
+        android_bugreport: {
+          title: g("android_title"),
+          headline: g("android_headline"),
+          body: g("android_body"),
+        },
+        ios_sysdiagnose: {
+          title: g("ios_title"),
+          headline: g("ios_headline"),
+          body: g("ios_body"),
+        },
+        message_report: {
+          title: g("message_title"),
+          lead: g("message_lead"),
+          button: g("message_button"),
+        },
+        notifications: {
+          encrypting_title: g("notif_encrypting_title"),
+          uploading_title: g("notif_uploading_title"),
+          uploading_progress_title: g("notif_uploading_progress_title"),
+          complete_title: g("notif_complete_title"),
+          failed_title: g("notif_failed_title"),
+          complete_body: g("notif_complete_body"),
+          failed_body: g("notif_failed_body"),
+        },
+      };
+    }
+
+    function stashCurrentLocaleForm() {
+      const f = $("branding-form");
+      if (!f) return;
+      if (brandingLocale === "en") {
+        baseCopySnapshot = collectCopyPayload(f);
+        baseStringsSnapshot = readStringsFromForm(f);
+      } else {
+        copyI18nState[brandingLocale] = collectCopyPayloadRaw(f);
+        stringsI18nState[brandingLocale] = readStringsFromForm(f);
+      }
+    }
+
+    function setBrandingLocale(next, { skipStash = false } = {}) {
+      const code = ["en", "fr", "es"].includes(next) ? next : "en";
+      const enabled = new Set(selectedLocales($("branding-form")));
+      if (!enabled.has(code)) return;
+      const f = $("branding-form");
+      if (!skipStash) stashCurrentLocaleForm();
+      brandingLocale = code;
+      $("locale-editor-bar")?.querySelectorAll("[data-branding-locale]").forEach((btn) => {
+        const on = btn.getAttribute("data-branding-locale") === code;
+        btn.classList.toggle("active", on);
+        btn.setAttribute("aria-selected", on ? "true" : "false");
+      });
+      if ($("locale-editor-hint")) {
+        $("locale-editor-hint").textContent = code === "en"
+          ? "Base English is the source. Other languages override or fall back to the built-in dictionary."
+          : `Editing ${LOCALE_LABELS[code]}. Leave a field blank to use the dictionary translation of English (or English itself).`;
+      }
+      if (!f) return;
+      if (code === "en") {
+        fillCopyFields(f, baseCopySnapshot || collectCopyPayload(f));
+        writeStringsToForm(f, baseStringsSnapshot || readStringsFromForm(f), { placeholders: false });
+        // restore English placeholders
+        const otpSub = fieldEl(f, "otp_notification_subject");
+        const otpBody = fieldEl(f, "otp_notification_body");
+        if (otpSub) otpSub.placeholder = "{display_name}: your verification code";
+        if (otpBody) otpBody.placeholder = "Your verification code for {company_name} is {code}…";
+      } else {
+        const over = deepMergeCopy(null, copyI18nState[code] || {});
+        fillCopyFields(f, over);
+        applyI18nPlaceholders(f, code);
+        writeStringsToForm(f, stringsI18nState[code] || emptyStringsPayload(), {
+          placeholders: true,
+          lang: code,
+        });
+      }
+      updateBrandingPreview();
+    }
+
+    function applyI18nPlaceholders(form, lang) {
+      if (!form || !baseCopySnapshot) return;
+      const walk = (section, fields) => {
+        for (const [name, path] of fields) {
+          const el = fieldEl(form, name);
+          if (!el) continue;
+          const english = path.split(".").reduce((o, k) => (o ? o[k] : ""), baseCopySnapshot) || "";
+          const auto = catalogLookup(lang, english);
+          if (auto) el.placeholder = auto;
+        }
+      };
+      walk("home", [
+        ["home_headline", "home.headline"], ["home_body", "home.body"],
+        ["home_android_title", "home.android_title"], ["home_android_subtitle", "home.android_subtitle"],
+        ["home_ios_title", "home.ios_title"], ["home_ios_subtitle", "home.ios_subtitle"],
+        ["home_message_title", "home.message_title"], ["home_message_subtitle", "home.message_subtitle"],
+      ]);
+      walk("consent", [
+        ["consent_title", "consent.title"], ["consent_footer", "consent.footer"],
+        ["consent_checkbox", "consent.checkbox"], ["consent_button", "consent.button"],
+        ["consent_disclosure_android", "consent.disclosure_android"],
+        ["consent_disclosure_ios", "consent.disclosure_ios"],
+        ["consent_disclosure_message", "consent.disclosure_message"],
+      ]);
+      walk("mydata", [
+        ["mydata_title", "my_data.title"], ["mydata_device_heading", "my_data.device_heading"],
+        ["mydata_artefacts_heading", "my_data.artefacts_heading"], ["mydata_empty", "my_data.empty"],
+        ["mydata_clear_button", "my_data.clear_button"],
+      ]);
+      walk("android", [
+        ["android_title", "android_bugreport.title"],
+        ["android_headline", "android_bugreport.headline"],
+        ["android_body", "android_bugreport.body"],
+      ]);
+      walk("ios", [
+        ["ios_title", "ios_sysdiagnose.title"],
+        ["ios_headline", "ios_sysdiagnose.headline"],
+        ["ios_body", "ios_sysdiagnose.body"],
+      ]);
+      walk("message", [
+        ["message_title", "message_report.title"],
+        ["message_lead", "message_report.lead"],
+        ["message_button", "message_report.button"],
+      ]);
+      walk("notif", [
+        ["notif_encrypting_title", "notifications.encrypting_title"],
+        ["notif_uploading_title", "notifications.uploading_title"],
+        ["notif_uploading_progress_title", "notifications.uploading_progress_title"],
+        ["notif_complete_title", "notifications.complete_title"],
+        ["notif_failed_title", "notifications.failed_title"],
+        ["notif_complete_body", "notifications.complete_body"],
+        ["notif_failed_body", "notifications.failed_body"],
+      ]);
+    }
+
+    async function ensureI18nCatalog() {
+      if (i18nCatalogLoaded) return;
+      try {
+        i18nCatalog = await api("/v1/admin/i18n/catalog");
+        i18nCatalogLoaded = true;
+      } catch (_) {
+        i18nCatalog = { fr: {}, es: {} };
+      }
+    }
 
     function brandingQuery() {
       const parts = [];
@@ -7415,7 +9330,7 @@
     }
 
     const DEFAULT_ENROLL_LEAD =
-      "Enter your work email to receive a one-time code, or use a lab key for local testing.";
+      "Enter your work email to receive a one-time verification code.";
     let brandingAssets = { logoUrl: "", iconUrl: "" };
     let brandingLocalUrls = { logo: "", icon: "" };
 
@@ -7462,6 +9377,7 @@
       bugreport: "Android bugreport",
       sysdiagnose: "iOS sysdiagnose",
       message: "Suspicious message",
+      notifications: "Upload notifications",
       icon: "Launcher icon",
     };
 
@@ -7575,6 +9491,15 @@
           lead: val(form, "message_lead", "We never open links on this device. Confirm any URL we detect below."),
           button: val(form, "message_button", "Continue to consent"),
         },
+        notifications: {
+          encrypting_title: val(form, "notif_encrypting_title", "Encrypting…"),
+          uploading_title: val(form, "notif_uploading_title", "Uploading…"),
+          uploading_progress_title: val(form, "notif_uploading_progress_title", "Uploading… {pct}%"),
+          complete_title: val(form, "notif_complete_title", "Upload complete"),
+          failed_title: val(form, "notif_failed_title", "Upload failed"),
+          complete_body: val(form, "notif_complete_body", "{artefact} was sent to the lab."),
+          failed_body: val(form, "notif_failed_body", "{artefact} could not be sent."),
+        },
       };
     }
 
@@ -7615,6 +9540,14 @@
       setVal(form, "message_title", msg.title);
       setVal(form, "message_lead", msg.lead);
       setVal(form, "message_button", msg.button);
+      const n = copy.notifications || {};
+      setVal(form, "notif_encrypting_title", n.encrypting_title ?? "");
+      setVal(form, "notif_uploading_title", n.uploading_title ?? "");
+      setVal(form, "notif_uploading_progress_title", n.uploading_progress_title ?? "");
+      setVal(form, "notif_complete_title", n.complete_title ?? "");
+      setVal(form, "notif_failed_title", n.failed_title ?? "");
+      setVal(form, "notif_complete_body", n.complete_body ?? "");
+      setVal(form, "notif_failed_body", n.failed_body ?? "");
     }
 
     function wirePreviewNav() {
@@ -7637,18 +9570,76 @@
       setPreviewScreen(previewScreen);
     }
 
+    function resolveLocalized(english, override, lang) {
+      const o = String(override ?? "").trim();
+      if (o) return o;
+      const en = String(english ?? "");
+      if (!lang || lang === "en") return en;
+      return catalogLookup(lang, en) || en;
+    }
+
+    function previewResolvedCopy(form) {
+      const base = baseCopySnapshot || collectCopyPayload(form);
+      if (brandingLocale === "en") return collectCopyPayload(form);
+      const over = collectCopyPayloadRaw(form);
+      const lang = brandingLocale;
+      const out = emptyCopyPayload();
+      for (const section of Object.keys(out)) {
+        for (const key of Object.keys(out[section])) {
+          out[section][key] = resolveLocalized(
+            base?.[section]?.[key],
+            over?.[section]?.[key],
+            lang,
+          );
+        }
+      }
+      return out;
+    }
+
     function updateBrandingPreview() {
       const f = $("branding-form");
       if (!f || !$("branding-phone")) return;
       const name = (f.display_name.value || "").trim() || "CollecteMoi";
-      const tagline = (f.tagline.value || "").trim();
-      const lead = (f.enroll_lead.value || "").trim() || DEFAULT_ENROLL_LEAD;
+      const baseStrings = baseStringsSnapshot || {
+        tagline: f.tagline.value,
+        enroll_lead: f.enroll_lead.value,
+        otp_notification_subject: rawField(f, "otp_notification_subject"),
+        otp_notification_body: rawField(f, "otp_notification_body"),
+      };
+      const liveStrings = brandingLocale === "en"
+        ? readStringsFromForm(f)
+        : readStringsFromForm(f);
+      const tagline = resolveLocalized(baseStrings.tagline, liveStrings.tagline, brandingLocale);
+      const lead = resolveLocalized(
+        baseStrings.enroll_lead || DEFAULT_ENROLL_LEAD,
+        liveStrings.enroll_lead,
+        brandingLocale,
+      ) || DEFAULT_ENROLL_LEAD;
       const server = (f.server_base_url.value || "").trim() || "https://127.0.0.1:8080";
       const support = (f.support_contact.value || "").trim();
       const privacy = (f.privacy_policy_url.value || "").trim();
       const seed = normalizeSeedHex(f.seed_color.value);
       const vars = seedToPreviewVars(seed);
       const cols = selectedCollectors(f);
+      const companyLabel = companyName(selectedCompanyId) || selectedCompanyId || "Acme";
+      const otpSubjectTpl = resolveLocalized(
+        baseStrings.otp_notification_subject || "{display_name}: your verification code",
+        liveStrings.otp_notification_subject,
+        brandingLocale,
+      );
+      const otpBodyTpl = resolveLocalized(
+        baseStrings.otp_notification_body
+          || "Your verification code for {company_name} is {code}.\n\nIt expires in {expires_in_mins} minutes.\n\nIf you did not request this, you can ignore this message.",
+        liveStrings.otp_notification_body,
+        brandingLocale,
+      );
+      const fillOtp = (tpl) => String(tpl || "")
+        .replaceAll("{code}", "123456")
+        .replaceAll("{company_name}", companyLabel)
+        .replaceAll("{display_name}", name)
+        .replaceAll("{email}", "you@example.com")
+        .replaceAll("{expires_in_mins}", "10")
+        .replaceAll("{expires_in_secs}", "600");
 
       const phone = $("branding-phone");
       phone.style.setProperty("--pv-seed", vars.seed);
@@ -7660,12 +9651,15 @@
       if ($("pv-tagline")) $("pv-tagline").textContent = tagline;
       if ($("pv-lead")) $("pv-lead").textContent = lead;
       if ($("pv-server")) $("pv-server").textContent = server;
+      if ($("pv-otp-subject")) $("pv-otp-subject").textContent = fillOtp(otpSubjectTpl);
+      if ($("pv-otp-body")) $("pv-otp-body").textContent = fillOtp(otpBodyTpl);
       const footBits = [];
       if (support) footBits.push(support);
       if (privacy) footBits.push(privacy);
       if ($("pv-foot")) $("pv-foot").textContent = footBits.join(" · ");
 
-      const copy = collectCopyPayload(f);
+      const copy = previewResolvedCopy(f);
+      updateBuildLocalesHint();
       if ($("pv-home-title")) $("pv-home-title").textContent = name;
       if ($("pv-home-headline")) $("pv-home-headline").textContent = copy.home.headline;
       if ($("pv-home-body")) $("pv-home-body").textContent = copy.home.body;
@@ -7724,6 +9718,23 @@
       if ($("pv-message-title")) $("pv-message-title").textContent = copy.message_report.title;
       if ($("pv-message-lead")) $("pv-message-lead").textContent = copy.message_report.lead;
       if ($("pv-message-button")) $("pv-message-button").textContent = copy.message_report.button;
+      const notif = copy.notifications || {};
+      const sampleArtefact = copy.home.message_title || "Suspicious message";
+      if ($("pv-notif-encrypting")) $("pv-notif-encrypting").textContent = notif.encrypting_title || "Encrypting…";
+      if ($("pv-notif-uploading")) {
+        $("pv-notif-uploading").textContent = String(notif.uploading_progress_title || "Uploading… {pct}%")
+          .replaceAll("{pct}", "42");
+      }
+      if ($("pv-notif-complete-title")) $("pv-notif-complete-title").textContent = notif.complete_title || "Upload complete";
+      if ($("pv-notif-complete-body")) {
+        $("pv-notif-complete-body").textContent = String(notif.complete_body || "{artefact} was sent to the lab.")
+          .replaceAll("{artefact}", sampleArtefact);
+      }
+      if ($("pv-notif-failed-title")) $("pv-notif-failed-title").textContent = notif.failed_title || "Upload failed";
+      if ($("pv-notif-failed-body")) {
+        $("pv-notif-failed-body").textContent = String(notif.failed_body || "{artefact} could not be sent.")
+          .replaceAll("{artefact}", sampleArtefact);
+      }
 
       if ($("pv-swatch-hex")) $("pv-swatch-hex").textContent = seed;
       if ($("pv-swatch")) $("pv-swatch").style.setProperty("--pv-seed", seed);
@@ -7864,7 +9875,21 @@
         }
         scheduleBrandingPreview();
       });
-      f.addEventListener("change", () => scheduleBrandingPreview());
+      f.addEventListener("change", (ev) => {
+        if (ev.target?.name === "loc_fr" || ev.target?.name === "loc_es" || ev.target?.name === "default_locale") {
+          syncLocaleEditorAvailability();
+        }
+        scheduleBrandingPreview();
+      });
+      const localeBar = $("locale-editor-bar");
+      if (localeBar && !localeBar.dataset.wired) {
+        localeBar.dataset.wired = "1";
+        localeBar.addEventListener("click", (ev) => {
+          const btn = ev.target.closest("[data-branding-locale]");
+          if (!btn || btn.disabled) return;
+          setBrandingLocale(btn.getAttribute("data-branding-locale"));
+        });
+      }
       f.addEventListener("focusin", (ev) => {
         const panel = ev.target?.closest?.("[data-screen-fields]");
         if (panel?.dataset.screenFields && panel.dataset.screenFields !== previewScreen) {
@@ -7929,14 +9954,37 @@
         fillCompanySelect(data.companies || [], data.company_id || selectedCompanyId);
         const f = $("branding-form");
         if (f && data.tenant) {
+          await ensureI18nCatalog();
           f.display_name.value = data.tenant.display_name || "";
-          f.tagline.value = data.tenant.tagline || "";
-          f.enroll_lead.value = data.tenant.enroll_lead || "";
           f.server_base_url.value = data.tenant.server_base_url || "";
           f.support_contact.value = data.tenant.support_contact || "";
           f.privacy_policy_url.value = data.tenant.privacy_policy_url || "";
+          setLocaleChecks(f, data.tenant.enabled_locales);
+          if (f.default_locale) {
+            f.default_locale.value = data.tenant.default_locale || "en";
+          }
           setCollectorChecks(f, data.tenant.enabled_collectors);
-          fillCopyFields(f, data.tenant.copy || {});
+          baseCopySnapshot = data.tenant.copy || emptyCopyPayload();
+          baseStringsSnapshot = {
+            tagline: data.tenant.tagline || "",
+            enroll_lead: data.tenant.enroll_lead || "",
+            otp_notification_subject: data.tenant.otp_notification_subject
+              || "{display_name}: your verification code",
+            otp_notification_body: data.tenant.otp_notification_body
+              || "Your verification code for {company_name} is {code}.\n\nIt expires in {expires_in_mins} minutes.\n\nIf you did not request this, you can ignore this message.",
+          };
+          copyI18nState = {};
+          stringsI18nState = {};
+          const ci = data.tenant.copy_i18n || {};
+          const si = data.tenant.strings_i18n || {};
+          for (const lang of ["fr", "es"]) {
+            if (ci[lang]) copyI18nState[lang] = deepMergeCopy(null, ci[lang]);
+            if (si[lang]) stringsI18nState[lang] = { ...emptyStringsPayload(), ...si[lang] };
+          }
+          brandingLocale = "en";
+          fillCopyFields(f, baseCopySnapshot);
+          writeStringsToForm(f, baseStringsSnapshot, { placeholders: false });
+          setBrandingLocale("en", { skipStash: true });
         }
         if (f && data.theme) {
           f.seed_color.value = normalizeSeedHex(data.theme.seed_color || "");
@@ -7996,13 +10044,14 @@
           return;
         }
         host.innerHTML = `<div class="table-wrap"><table>
-          <thead><tr><th>File</th><th>Company</th><th>Brand ver</th><th>App ver</th><th>SHA-256</th><th>Platform</th><th>Size</th><th>Updated</th><th></th></tr></thead>
+          <thead><tr><th>File</th><th>Company</th><th>Brand ver</th><th>App ver</th><th>SHA-256</th><th>Platform</th><th>Size</th><th>Generated</th><th></th></tr></thead>
           <tbody>${builds
             .map((b) => {
               const sha = String(b.sha256 || "");
               const shaShort = sha.length >= 16
                 ? `${sha.slice(0, 10)}…${sha.slice(-6)}`
                 : (sha || "—");
+              const when = b.generated_at || b.modified_at || "";
               return `<tr>
             <td class="mono">${esc(b.name)}</td>
             <td>${companyPill(b.company_id || company, { link: false })}</td>
@@ -8015,7 +10064,7 @@
             </td>
             <td><span class="pill">${esc(b.platform)}</span></td>
             <td class="mono">${esc(formatBytes(b.size, { compact: true }))}</td>
-            <td class="mono" title="${esc(b.modified_at || "")}">${esc(formatTs(b.modified_at))}</td>
+            <td class="mono" title="${esc(when)}">${esc(formatTs(when))}</td>
             <td>
               <div class="split-actions">
                 <button type="button" class="primary sm mobile-dl" data-name="${esc(b.name)}" data-company="${esc(b.company_id || company)}" data-version="${esc(b.branding_version || "")}">Download</button>
@@ -8106,6 +10155,54 @@
     }
     $("mobile-refresh")?.addEventListener("click", refreshMobileBuildsList);
     $("mobile-refresh-downloads")?.addEventListener("click", refreshMobileBuildsList);
+
+    $("mobile-keep-latest")?.addEventListener("click", async () => {
+      const builds = state.cache.mobileBuilds || [];
+      const company = selectedCompanyId || "_default";
+      if (!builds.length) {
+        toast("No builds listed for this company", true);
+        return;
+      }
+      // Group by branding version; keep newest app version (or newest mtime).
+      const byBrand = new Map();
+      for (const b of builds) {
+        const key = `${b.company_id || company}|${b.branding_version || ""}`;
+        const list = byBrand.get(key) || [];
+        list.push(b);
+        byBrand.set(key, list);
+      }
+      const keep = new Set();
+      for (const list of byBrand.values()) {
+        const versioned = list.filter((b) => /^collectemoi-\d+\.\d+\.\d+/i.test(b.name));
+        const pool = versioned.length ? versioned : list;
+        pool.sort((a, b) => String(b.generated_at || b.modified_at || "").localeCompare(String(a.generated_at || a.modified_at || "")));
+        if (pool[0]) keep.add(`${pool[0].company_id || ""}|${pool[0].branding_version || ""}|${pool[0].name}`);
+      }
+      const toDelete = builds.filter((b) => !keep.has(`${b.company_id || ""}|${b.branding_version || ""}|${b.name}`));
+      if (!toDelete.length) {
+        toast("Already only the latest build(s)");
+        return;
+      }
+      if (!window.confirm(`Delete ${toDelete.length} older build(s) for “${company}”, keep newest only?`)) return;
+      let ok = 0;
+      let fail = 0;
+      for (const b of toDelete) {
+        try {
+          const params = new URLSearchParams();
+          if (b.company_id || company) params.set("company_id", b.company_id || company);
+          if (b.branding_version) params.set("version", b.branding_version);
+          const qs = params.toString();
+          await api(`/v1/admin/mobile/${encodeURIComponent(b.name)}${qs ? `?${qs}` : ""}`, {
+            method: "DELETE",
+          });
+          ok += 1;
+        } catch {
+          fail += 1;
+        }
+      }
+      toast(fail ? `Kept latest · deleted ${ok}, failed ${fail}` : `Kept latest · deleted ${ok}`, fail > 0);
+      loadMobileBuilds();
+    });
 
     $("mobile-delete-all")?.addEventListener("click", async () => {
       const builds = state.cache.mobileBuilds || [];
@@ -8228,15 +10325,24 @@
       if (btn) btn.disabled = true;
       if ($("branding-meta")) $("branding-meta").textContent = "Saving branding…";
       try {
+        stashCurrentLocaleForm();
+        const baseStrings = baseStringsSnapshot || readStringsFromForm(f);
+        const baseCopy = baseCopySnapshot || collectCopyPayload(f);
         await api(`/v1/admin/branding${brandingQuery()}`, {
           method: "PUT",
           body: JSON.stringify({
             display_name: f.display_name.value.trim(),
-            tagline: f.tagline.value.trim(),
-            enroll_lead: f.enroll_lead.value.trim(),
+            tagline: String(baseStrings.tagline || "").trim(),
+            enroll_lead: String(baseStrings.enroll_lead || "").trim(),
             server_base_url: f.server_base_url.value.trim(),
             support_contact: f.support_contact.value.trim(),
             privacy_policy_url: f.privacy_policy_url.value.trim(),
+            default_locale: (f.default_locale?.value || "en").trim() || "en",
+            enabled_locales: selectedLocales(f),
+            otp_notification_subject: String(baseStrings.otp_notification_subject
+              || "{display_name}: your verification code").trim(),
+            otp_notification_body: String(baseStrings.otp_notification_body
+              || "Your verification code for {company_name} is {code}.\n\nIt expires in {expires_in_mins} minutes.\n\nIf you did not request this, you can ignore this message.").trim(),
             seed_color: f.seed_color.value.trim(),
             launcher_icon: {
               enabled: $("icon-text-enabled").checked,
@@ -8254,7 +10360,13 @@
               badge_opacity: Number($("icon-badge-opacity").value),
             },
             enabled_collectors: selectedCollectors(f),
-            copy: collectCopyPayload(f),
+            copy: baseCopy,
+            copy_i18n: Object.fromEntries(
+              selectedLocales(f).filter((c) => c !== "en").map((c) => [c, copyI18nState[c] || emptyCopyPayload()]),
+            ),
+            strings_i18n: Object.fromEntries(
+              selectedLocales(f).filter((c) => c !== "en").map((c) => [c, stringsI18nState[c] || emptyStringsPayload()]),
+            ),
           }),
         });
         toast("Branding saved");

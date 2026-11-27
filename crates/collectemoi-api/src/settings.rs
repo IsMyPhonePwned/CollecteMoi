@@ -2,7 +2,8 @@
 //! without restarting (bind address still requires restart).
 //!
 //! Mutable lab toggles (`display_name`, `public_url`, `lab_seal`,
-//! `allow_dev_envelope`) are persisted in SQLite so they survive restart.
+//! `allow_dev_envelope`, OTP webhook) are persisted in SQLite so they
+//! survive restart.
 
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +25,12 @@ pub struct RuntimeSettings {
     /// Plain HTTP companion (lab admin without trusting the self-signed cert).
     pub http_bind: String,
     pub lab_reveal_otp: bool,
+    /// When set, `POST /v1/enroll/start` delivers email OTPs to this URL.
+    #[serde(default)]
+    pub otp_delivery_webhook_url: String,
+    /// Optional Bearer token sent as `Authorization` on webhook calls.
+    #[serde(default)]
+    pub otp_delivery_webhook_token: String,
 }
 
 /// Subset of settings written to SQLite across process restarts.
@@ -37,6 +44,10 @@ pub struct PersistedSettings {
     pub lab_seal: Option<bool>,
     #[serde(default)]
     pub allow_dev_envelope: Option<bool>,
+    #[serde(default)]
+    pub otp_delivery_webhook_url: Option<String>,
+    #[serde(default)]
+    pub otp_delivery_webhook_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,6 +56,8 @@ pub struct SettingsPatch {
     pub display_name: Option<String>,
     pub lab_seal: Option<bool>,
     pub allow_dev_envelope: Option<bool>,
+    pub otp_delivery_webhook_url: Option<String>,
+    pub otp_delivery_webhook_token: Option<String>,
 }
 
 impl RuntimeSettings {
@@ -62,6 +75,12 @@ impl RuntimeSettings {
         }
         if let Some(v) = patch.allow_dev_envelope {
             self.allow_dev_envelope = v;
+        }
+        if let Some(v) = patch.otp_delivery_webhook_url {
+            self.otp_delivery_webhook_url = v.trim().to_string();
+        }
+        if let Some(v) = patch.otp_delivery_webhook_token {
+            self.otp_delivery_webhook_token = v.trim().to_string();
         }
     }
 
@@ -83,6 +102,12 @@ impl RuntimeSettings {
         if let Some(v) = p.allow_dev_envelope {
             self.allow_dev_envelope = v;
         }
+        if let Some(ref url) = p.otp_delivery_webhook_url {
+            self.otp_delivery_webhook_url = url.trim().to_string();
+        }
+        if let Some(ref token) = p.otp_delivery_webhook_token {
+            self.otp_delivery_webhook_token = token.trim().to_string();
+        }
     }
 
     pub fn to_persisted(&self) -> PersistedSettings {
@@ -91,7 +116,13 @@ impl RuntimeSettings {
             display_name: Some(self.display_name.clone()),
             lab_seal: Some(self.lab_seal),
             allow_dev_envelope: Some(self.allow_dev_envelope),
+            otp_delivery_webhook_url: Some(self.otp_delivery_webhook_url.clone()),
+            otp_delivery_webhook_token: Some(self.otp_delivery_webhook_token.clone()),
         }
+    }
+
+    pub fn otp_webhook_configured(&self) -> bool {
+        !self.otp_delivery_webhook_url.trim().is_empty()
     }
 }
 

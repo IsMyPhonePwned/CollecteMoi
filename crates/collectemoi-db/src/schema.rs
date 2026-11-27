@@ -1,6 +1,6 @@
 //! Schema DDL. Table/column names are fixed constants — never derived from user input.
 
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 8;
 
 pub const DDL: &str = r#"
 PRAGMA foreign_keys = ON;
@@ -22,7 +22,11 @@ CREATE TABLE IF NOT EXISTS companies (
     case_id TEXT NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1,
     updated_at TEXT NOT NULL,
-    color TEXT NOT NULL DEFAULT ''
+    color TEXT NOT NULL DEFAULT '',
+    -- Max active (non-banned) devices per work email. 1 = unique email↔device; 0 = unlimited.
+    max_devices_per_email INTEGER NOT NULL DEFAULT 1,
+    -- New upload sessions per device per rolling hour. 0 = unlimited.
+    device_uploads_per_hour INTEGER NOT NULL DEFAULT 10
 );
 
 CREATE TABLE IF NOT EXISTS lab_keys (
@@ -48,7 +52,15 @@ CREATE TABLE IF NOT EXISTS devices (
     enrolled_at TEXT NOT NULL,
     banned INTEGER NOT NULL DEFAULT 0,
     email TEXT NOT NULL DEFAULT '',
-    company_id TEXT NOT NULL DEFAULT ''
+    company_id TEXT NOT NULL DEFAULT '',
+    app_version TEXT NOT NULL DEFAULT '',
+    manufacturer TEXT NOT NULL DEFAULT '',
+    brand TEXT NOT NULL DEFAULT '',
+    device_name TEXT NOT NULL DEFAULT '',
+    details_json TEXT NOT NULL DEFAULT '',
+    last_seen_at TEXT NOT NULL DEFAULT '',
+    -- When set, this device ignores the company upload-per-hour quota.
+    rate_limit_bypass INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_devices_public_key ON devices(public_key);
@@ -120,7 +132,13 @@ CREATE TABLE IF NOT EXISTS access_events (
     user_agent TEXT NOT NULL DEFAULT '',
     device_id TEXT NOT NULL DEFAULT '',
     kind TEXT NOT NULL DEFAULT '',
-    resource_id TEXT NOT NULL DEFAULT ''
+    resource_id TEXT NOT NULL DEFAULT '',
+    is_admin INTEGER NOT NULL DEFAULT 0,
+    admin_user TEXT NOT NULL DEFAULT '',
+    app_version TEXT NOT NULL DEFAULT '',
+    platform TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    os_version TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_access_ts ON access_events(ts DESC);

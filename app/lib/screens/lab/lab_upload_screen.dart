@@ -9,7 +9,7 @@ import '../../models/models.dart';
 import '../../services/bugreport_validator.dart';
 import '../../services/sysdiagnose_validator.dart';
 import '../../services/upload_queue.dart';
-import '../../widgets/theme_picker_button.dart';
+import '../../widgets/settings_button.dart';
 
 /// Browser / desktop lab helper: pick any file and submit it as an artefact.
 class LabUploadScreen extends StatefulWidget {
@@ -75,7 +75,7 @@ class _LabUploadScreenState extends State<LabUploadScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(context.tr('Lab file upload')),
-        actions: const [ThemePickerButton()],
+        actions: const [SettingsButton()],
       ),
       body: Center(
         child: ConstrainedBox(
@@ -101,8 +101,12 @@ class _LabUploadScreenState extends State<LabUploadScreen> {
                   border: OutlineInputBorder(),
                 ),
                 items: ArtefactKind.values
+                    .where((k) => k.availableOnThisDevice)
                     .map(
-                      (k) => DropdownMenuItem(value: k, child: Text(context.tr(k.label))),
+                      (k) => DropdownMenuItem(
+                        value: k,
+                        child: Text(context.tr(k.label)),
+                      ),
                     )
                     .toList(),
                 onChanged: (v) => setState(() => _artefact = v ?? _artefact),

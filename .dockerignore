@@ -4,16 +4,31 @@
 .vscode
 .agents
 .codex
-app
 clients
 data
 dist
 docs
-scripts
 target
 **/target
 **/node_modules
 **/.dart_tool
 **/build
+**/.gradle
+**/Pods
+**/.symlinks
+app/build
+app/.dart_tool
+app/ios/Pods
+app/ios/.symlinks
+app/android/.gradle
+app/android/local.properties
 *.log
 *.swp
+*.md
+LICENSE
+.env
+.env.*
+
+# Keep docker/, scripts/, app/, crates/ for the image.
+# Ignore heavy / irrelevant scripts helpers that are macOS-only extras if desired —
+# overlay helpers are required and included explicitly via Dockerfile COPY.

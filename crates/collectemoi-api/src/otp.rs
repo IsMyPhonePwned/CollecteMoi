@@ -33,10 +33,25 @@ pub struct Company {
     /// Label color `#RRGGBB` used in the admin console.
     #[serde(default)]
     pub color: String,
+    /// Max active (non-banned) devices per work email.
+    /// `1` = one device per email (unique association); `0` = unlimited.
+    #[serde(default = "default_max_devices_per_email")]
+    pub max_devices_per_email: u32,
+    /// New upload sessions allowed per device per rolling hour (`0` = unlimited).
+    #[serde(default = "default_device_uploads_per_hour")]
+    pub device_uploads_per_hour: u32,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_max_devices_per_email() -> u32 {
+    1
+}
+
+fn default_device_uploads_per_hour() -> u32 {
+    10
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,8 +83,6 @@ struct Challenge {
     company_id: String,
     case_id: Uuid,
     code_hash: String,
-    /// Plain code kept only until expiry for lab reveal / logs (not returned after start except lab_otp).
-    code_plain: String,
     expires_at: u64,
     used: bool,
     via_lab_key: Option<String>,
@@ -127,6 +140,14 @@ pub struct EnrollStartResponse {
     pub lab_otp: Option<String>,
 }
 
+/// Internal outcome of [`OtpStore::start`] — includes plaintext code for webhook delivery.
+pub struct EnrollStartOutcome {
+    pub response: EnrollStartResponse,
+    /// Set for email enrollments that should be delivered out-of-band (not lab-key shortcuts).
+    pub delivery: Option<crate::otp_delivery::OtpWebhookPayload>,
+    pub via_lab_key: bool,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct EnrollConfirmRequest {
     pub challenge_id: Uuid,
@@ -136,40 +157,87 @@ pub struct EnrollConfirmRequest {
     pub platform: String,
     pub model: String,
     pub os_version: String,
+    #[serde(default)]
+    pub app_version: String,
+    #[serde(default)]
+    pub manufacturer: String,
+    #[serde(default)]
+    pub brand: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub details: serde_json::Value,
 }
 
 impl OtpStore {
-    pub fn open(data_dir: &Path, db: Arc<Db>, reveal_otp: bool) -> anyhow::Result<Self> {
+    pub fn open(
+        data_dir: &Path,
+        db: Arc<Db>,
+        reveal_otp: bool,
+        seed_demo_lab_keys: bool,
+    ) -> anyhow::Result<Self> {
         let companies_path = data_dir.join("companies.json");
         let lab_keys_path = data_dir.join("lab_keys.json");
         let log_path = data_dir.join("enrollment_log.jsonl");
         fs::create_dir_all(data_dir)?;
 
         let demo_case = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+        // Demo companies/lab keys seed only on loopback lab binds. Docker (0.0.0.0) starts empty.
         let mut companies = load_companies_from_db(&db)?.unwrap_or_else(|| {
-            load_or_seed_companies(&companies_path, demo_case).unwrap_or_default()
+            load_or_seed_companies(&companies_path, demo_case, seed_demo_lab_keys)
+                .unwrap_or_default()
         });
         for c in &mut companies {
             c.color = sanitize_company_color(&c.color, &c.id);
         }
         let mut lab_keys = load_lab_keys_from_db(&db)?.unwrap_or_else(|| {
-            load_or_seed_lab_keys(&lab_keys_path, demo_case).unwrap_or_default()
+            load_or_seed_lab_keys(&lab_keys_path, demo_case, seed_demo_lab_keys)
+                .unwrap_or_default()
         });
-        // Ensure seeds exist in SQL when DB was empty and files were seeded.
+        if !seed_demo_lab_keys {
+            let default_labels = [
+                ("LAB-DEMO01", "Primary lab key"),
+                ("LAB-DEMO02", "Secondary lab key"),
+                ("LAB-QUICK1", "Quick test 1"),
+                ("LAB-QUICK2", "Quick test 2"),
+                ("LAB-QUICK3", "Quick test 3"),
+            ];
+            let now = now_secs().to_string();
+            let mut disabled_seed = false;
+            for (map_key, key) in &mut lab_keys {
+                let is_seed = default_labels
+                    .iter()
+                    .any(|(seed, _)| map_key.eq_ignore_ascii_case(seed));
+                if is_seed && key.enabled {
+                    key.enabled = false;
+                    key.updated_at = now.clone();
+                    disabled_seed = true;
+                }
+            }
+            if disabled_seed {
+                for key in lab_keys.values() {
+                    db.lab_key_upsert(&lab_key_to_row(key))?;
+                }
+                let list: Vec<_> = lab_keys.values().cloned().collect();
+                persist_json(&lab_keys_path, &list)?;
+                tracing::warn!("disabled well-known demo lab keys on a non-loopback listener");
+            }
+        }
+        // Persist whatever we loaded (or seeded) into SQL when files were the source.
         for c in &companies {
             let _ = db.company_upsert(&company_to_row(c));
         }
         for k in lab_keys.values() {
             let _ = db.lab_key_upsert(&lab_key_to_row(k));
         }
-        if companies.is_empty() {
-            companies = load_or_seed_companies(&companies_path, demo_case)?;
+        if companies.is_empty() && seed_demo_lab_keys {
+            companies = load_or_seed_companies(&companies_path, demo_case, true)?;
             for c in &companies {
                 let _ = db.company_upsert(&company_to_row(c));
             }
         }
         if lab_keys.is_empty() {
-            lab_keys = load_or_seed_lab_keys(&lab_keys_path, demo_case)?;
+            lab_keys = load_or_seed_lab_keys(&lab_keys_path, demo_case, seed_demo_lab_keys)?;
             for k in lab_keys.values() {
                 let _ = db.lab_key_upsert(&lab_key_to_row(k));
             }
@@ -220,7 +288,7 @@ impl OtpStore {
                         company_id: r.company_id,
                         challenge_id: r.challenge_id,
                         device_id: r.device_id,
-                        lab_key: r.lab_key,
+                        lab_key: r.lab_key.map(|key| mask_lab_key(&key)),
                         detail: r.detail,
                     })
                     .collect();
@@ -255,6 +323,12 @@ impl OtpStore {
             .collect();
         if company.domains.is_empty() {
             return Err("at least one domain required".into());
+        }
+        if company.max_devices_per_email > 1000 {
+            return Err("max_devices_per_email must be between 0 and 1000".into());
+        }
+        if company.device_uploads_per_hour > 10_000 {
+            return Err("device_uploads_per_hour must be between 0 and 10000".into());
         }
         company.color = sanitize_company_color(&company.color, &company.id);
         company.updated_at = now_secs().to_string();
@@ -350,7 +424,32 @@ impl OtpStore {
         list
     }
 
+    /// Append a structured enrollment audit event (SQLite + JSONL + tracing).
+    pub fn audit(
+        &self,
+        event: &str,
+        email: Option<&str>,
+        company_id: Option<&str>,
+        challenge_id: Option<&str>,
+        device_id: Option<&str>,
+        lab_key: Option<&str>,
+        detail: Option<&str>,
+    ) {
+        self.log(EnrollmentLogEvent {
+            ts: now_secs(),
+            event: event.into(),
+            email: email.map(|s| s.to_string()),
+            company_id: company_id.map(|s| s.to_string()),
+            challenge_id: challenge_id.map(|s| s.to_string()),
+            device_id: device_id.map(|s| s.to_string()),
+            lab_key: lab_key.map(|s| s.to_string()),
+            detail: detail.map(|s| s.to_string()),
+        });
+    }
+
     fn log(&self, event: EnrollmentLogEvent) {
+        let mut event = event;
+        event.lab_key = event.lab_key.map(|key| mask_lab_key(&key));
         let _ = self.db.enrollment_log(&EnrollmentEventRow {
             ts: event.ts,
             event: event.event.clone(),
@@ -370,19 +469,44 @@ impl OtpStore {
                 let _ = writeln!(f, "{line}");
             }
         }
-        tracing::info!(
-            event = %event.event,
-            email = ?event.email,
-            company = ?event.company_id,
-            challenge = ?event.challenge_id,
-            device = ?event.device_id,
-            lab_key = ?event.lab_key,
-            detail = ?event.detail,
-            "enrollment"
-        );
+        let fail = event.event.contains("fail") || event.event.contains("error");
+        if fail {
+            tracing::warn!(
+                event = %event.event,
+                email = ?event.email,
+                company = ?event.company_id,
+                challenge = ?event.challenge_id,
+                device = ?event.device_id,
+                lab_key = ?event.lab_key,
+                detail = ?event.detail,
+                "enrollment"
+            );
+        } else {
+            tracing::info!(
+                event = %event.event,
+                email = ?event.email,
+                company = ?event.company_id,
+                challenge = ?event.challenge_id,
+                device = ?event.device_id,
+                lab_key = ?event.lab_key,
+                detail = ?event.detail,
+                "enrollment"
+            );
+        }
     }
 
-    pub fn start(&self, req: EnrollStartRequest) -> Result<EnrollStartResponse, String> {
+    pub fn drop_challenge(&self, challenge_id: Uuid) {
+        self.challenges.lock().unwrap().remove(&challenge_id);
+    }
+
+    pub fn start<F>(
+        &self,
+        req: EnrollStartRequest,
+        slot_ok: F,
+    ) -> Result<EnrollStartOutcome, String>
+    where
+        F: FnOnce(&str, u32) -> Result<(), String>,
+    {
         let now = now_secs();
         let lab_key_raw = req
             .lab_key
@@ -417,6 +541,8 @@ impl OtpStore {
                     enabled: true,
                     updated_at: now_secs().to_string(),
                     color: default_company_color("lab"),
+                    max_devices_per_email: 0,
+                    device_uploads_per_hour: 10,
                 })
             };
             if !company.enabled {
@@ -441,6 +567,9 @@ impl OtpStore {
             (email, company, None)
         };
 
+        // Reject before issuing an OTP when this email is already at capacity.
+        slot_ok(&email, company.max_devices_per_email)?;
+
         let code = generate_otp();
         let challenge_id = Uuid::new_v4();
         let code_hash = hash_otp(challenge_id, &code);
@@ -457,7 +586,6 @@ impl OtpStore {
                     company_id: company.id.clone(),
                     case_id: company.case_id,
                     code_hash,
-                    code_plain: code.clone(),
                     expires_at,
                     used: false,
                     via_lab_key: via_lab_key.clone(),
@@ -470,36 +598,61 @@ impl OtpStore {
 
         self.log(EnrollmentLogEvent {
             ts: now,
-            event: "otp_start".into(),
+            event: "otp_start_ok".into(),
             email: Some(email.clone()),
             company_id: Some(company.id.clone()),
             challenge_id: Some(challenge_id.to_string()),
             device_id: None,
             lab_key: via_lab_key.clone(),
             detail: Some(format!(
-                "otp_issued ttl={OTP_TTL_SECS}s code={code}{}",
-                accept_lab_as_code
-                    .as_ref()
-                    .map(|k| format!(" (lab key {k} also valid as code)"))
-                    .unwrap_or_default()
+                "otp_issued ttl={OTP_TTL_SECS}s{}",
+                if accept_lab_as_code.is_some() {
+                    "; lab key also accepted as code"
+                } else {
+                    ""
+                }
             )),
         });
 
         let reveal = self.reveal_otp || via_lab_key.is_some();
-        Ok(EnrollStartResponse {
-            challenge_id,
-            email: email.clone(),
-            email_masked: mask_email(&email),
-            company_id: company.id.clone(),
-            company_name: company.name.clone(),
-            expires_in_secs: OTP_TTL_SECS,
-            message: if via_lab_key.is_some() {
-                "Lab key accepted. Use the returned lab_otp (or the lab key itself) to confirm."
-                    .into()
-            } else {
-                "Verification code sent (lab: see lab_otp / server enrollment log).".into()
+        let via_lab = via_lab_key.is_some();
+        let email_masked = mask_email(&email);
+        let delivery = if via_lab {
+            None
+        } else {
+            Some(crate::otp_delivery::OtpWebhookPayload {
+                event: "enroll_otp",
+                email: email.clone(),
+                email_masked: email_masked.clone(),
+                code: code.clone(),
+                challenge_id,
+                company_id: company.id.clone(),
+                company_name: company.name.clone(),
+                expires_in_secs: OTP_TTL_SECS,
+                expires_at: expires_at,
+                subject: String::new(),
+                body: String::new(),
+            })
+        };
+        Ok(EnrollStartOutcome {
+            response: EnrollStartResponse {
+                challenge_id,
+                email: email.clone(),
+                email_masked,
+                company_id: company.id.clone(),
+                company_name: company.name.clone(),
+                expires_in_secs: OTP_TTL_SECS,
+                message: if via_lab {
+                    "Lab key accepted. Use the returned lab_otp (or the lab key itself) to confirm."
+                        .into()
+                } else {
+                    // Refined by the HTTP handler once webhook delivery succeeds/fails.
+                    "Verification code issued.".into()
+                },
+                lab_otp: reveal.then_some(code),
             },
-            lab_otp: reveal.then_some(code),
+            delivery,
+            via_lab_key: via_lab,
         })
     }
 
@@ -510,9 +663,19 @@ impl OtpStore {
     ) -> Result<(EnrollResponse, String), String> {
         let now = now_secs();
         let mut challenges = self.challenges.lock().unwrap();
-        let ch = challenges
-            .get_mut(&req.challenge_id)
-            .ok_or_else(|| "unknown or expired challenge".to_string())?;
+        let Some(ch) = challenges.get_mut(&req.challenge_id) else {
+            self.log(EnrollmentLogEvent {
+                ts: now,
+                event: "otp_confirm_fail".into(),
+                email: None,
+                company_id: None,
+                challenge_id: Some(req.challenge_id.to_string()),
+                device_id: None,
+                lab_key: None,
+                detail: Some("unknown_challenge".into()),
+            });
+            return Err("unknown or expired challenge".into());
+        };
 
         if ch.used {
             self.log(EnrollmentLogEvent {
@@ -523,7 +686,7 @@ impl OtpStore {
                 challenge_id: Some(ch.id.to_string()),
                 device_id: None,
                 lab_key: ch.via_lab_key.clone(),
-                detail: Some("already used".into()),
+                detail: Some("already_used".into()),
             });
             return Err("challenge already used".into());
         }
@@ -548,10 +711,7 @@ impl OtpStore {
             .map(|k| k.eq_ignore_ascii_case(code))
             .unwrap_or(false);
         let hash_ok = hash_otp(ch.id, code) == ch.code_hash;
-        // Also accept the stored plain code (normalization).
-        let plain_ok = code == ch.code_plain;
-
-        if !(hash_ok || plain_ok || lab_ok) {
+        if !(hash_ok || lab_ok) {
             self.log(EnrollmentLogEvent {
                 ts: now,
                 event: "otp_confirm_fail".into(),
@@ -560,7 +720,7 @@ impl OtpStore {
                 challenge_id: Some(ch.id.to_string()),
                 device_id: None,
                 lab_key: ch.via_lab_key.clone(),
-                detail: Some("invalid code".into()),
+                detail: Some("invalid_code".into()),
             });
             return Err("invalid verification code".into());
         }
@@ -582,11 +742,21 @@ impl OtpStore {
                     let _ = self.db.lab_key_upsert(&lab_key_to_row(k));
                     let list: Vec<_> = keys.values().cloned().collect();
                     let _ = persist_json(&self.lab_keys_path, &list);
+                    self.log(EnrollmentLogEvent {
+                        ts: now,
+                        event: "lab_key_consumed".into(),
+                        email: Some(email.clone()),
+                        company_id: Some(company_id.clone()),
+                        challenge_id: Some(challenge_id.to_string()),
+                        device_id: None,
+                        lab_key: Some(lk.clone()),
+                        detail: Some("one_shot_disabled".into()),
+                    });
                 }
             }
         }
 
-        let res = enroll_fn(ConfirmEnrollInput {
+        let res = match enroll_fn(ConfirmEnrollInput {
             case_id,
             email: email.clone(),
             company_id: company_id.clone(),
@@ -595,17 +765,38 @@ impl OtpStore {
             platform: req.platform,
             model: req.model,
             os_version: req.os_version,
-        })?;
+            app_version: req.app_version,
+            manufacturer: req.manufacturer,
+            brand: req.brand,
+            name: req.name,
+            details: req.details,
+        }) {
+            Ok(r) => r,
+            Err(e) => {
+                let reason = classify_enroll_fail(&e);
+                self.log(EnrollmentLogEvent {
+                    ts: now,
+                    event: "enroll_fail".into(),
+                    email: Some(email),
+                    company_id: Some(company_id),
+                    challenge_id: Some(challenge_id.to_string()),
+                    device_id: None,
+                    lab_key,
+                    detail: Some(format!("{reason}: {e}")),
+                });
+                return Err(e);
+            }
+        };
 
         self.log(EnrollmentLogEvent {
             ts: now,
-            event: "otp_confirm_ok".into(),
+            event: "enroll_ok".into(),
             email: Some(email.clone()),
             company_id: Some(company_id),
             challenge_id: Some(challenge_id.to_string()),
             device_id: Some(res.device_id.to_string()),
             lab_key,
-            detail: Some("enrolled".into()),
+            detail: Some("enrolled_via_otp".into()),
         });
 
         Ok((res, email))
@@ -622,6 +813,16 @@ impl OtpStore {
     }
 }
 
+fn mask_lab_key(key: &str) -> String {
+    let chars: Vec<char> = key.chars().collect();
+    if chars.len() <= 4 {
+        return "•".repeat(chars.len());
+    }
+    let prefix: String = chars.iter().take(2).copied().collect();
+    let suffix: String = chars[chars.len() - 2..].iter().copied().collect();
+    format!("{prefix}…{suffix}")
+}
+
 pub struct ConfirmEnrollInput {
     pub case_id: Uuid,
     pub email: String,
@@ -631,9 +832,18 @@ pub struct ConfirmEnrollInput {
     pub platform: String,
     pub model: String,
     pub os_version: String,
+    pub app_version: String,
+    pub manufacturer: String,
+    pub brand: String,
+    pub name: String,
+    pub details: serde_json::Value,
 }
 
-fn load_or_seed_companies(path: &Path, demo_case: Uuid) -> anyhow::Result<Vec<Company>> {
+fn load_or_seed_companies(
+    path: &Path,
+    demo_case: Uuid,
+    seed_demo: bool,
+) -> anyhow::Result<Vec<Company>> {
     if path.exists() {
         let bytes = fs::read(path)?;
         if let Ok(list) = serde_json::from_slice::<Vec<Company>>(&bytes) {
@@ -641,6 +851,9 @@ fn load_or_seed_companies(path: &Path, demo_case: Uuid) -> anyhow::Result<Vec<Co
                 return Ok(list);
             }
         }
+    }
+    if !seed_demo {
+        return Ok(Vec::new());
     }
     let seeded_at = now_secs().to_string();
     let seeded = vec![
@@ -656,6 +869,9 @@ fn load_or_seed_companies(path: &Path, demo_case: Uuid) -> anyhow::Result<Vec<Co
             enabled: true,
             updated_at: seeded_at.clone(),
             color: "#2EC4A0".into(),
+            // Lab testing often reuses the same mailbox across phones.
+            max_devices_per_email: 0,
+            device_uploads_per_hour: 0,
         },
         Company {
             id: "demo-corp".into(),
@@ -665,13 +881,19 @@ fn load_or_seed_companies(path: &Path, demo_case: Uuid) -> anyhow::Result<Vec<Co
             enabled: true,
             updated_at: seeded_at,
             color: "#3B82F6".into(),
+            max_devices_per_email: 1,
+            device_uploads_per_hour: 10,
         },
     ];
     persist_json(path, &seeded)?;
     Ok(seeded)
 }
 
-fn load_or_seed_lab_keys(path: &Path, demo_case: Uuid) -> anyhow::Result<HashMap<String, LabKey>> {
+fn load_or_seed_lab_keys(
+    path: &Path,
+    demo_case: Uuid,
+    seed_demo_lab_keys: bool,
+) -> anyhow::Result<HashMap<String, LabKey>> {
     let list: Vec<LabKey> = if path.exists() {
         let bytes = fs::read(path)?;
         serde_json::from_slice(&bytes).unwrap_or_default()
@@ -682,7 +904,7 @@ fn load_or_seed_lab_keys(path: &Path, demo_case: Uuid) -> anyhow::Result<HashMap
     for k in list {
         map.insert(k.key.to_uppercase(), k);
     }
-    if map.is_empty() {
+    if map.is_empty() && seed_demo_lab_keys {
         for (key, label) in [
             ("LAB-DEMO01", "Primary lab key"),
             ("LAB-DEMO02", "Secondary lab key"),
@@ -719,6 +941,8 @@ fn company_to_row(c: &Company) -> CompanyRow {
         enabled: c.enabled,
         updated_at: c.updated_at.clone(),
         color: c.color.clone(),
+        max_devices_per_email: c.max_devices_per_email,
+        device_uploads_per_hour: c.device_uploads_per_hour,
     }
 }
 
@@ -789,6 +1013,8 @@ fn load_companies_from_db(db: &Db) -> anyhow::Result<Option<Vec<Company>>> {
                     enabled: r.enabled,
                     updated_at: r.updated_at,
                     color,
+                    max_devices_per_email: r.max_devices_per_email,
+                    device_uploads_per_hour: r.device_uploads_per_hour,
                 }
             })
             .collect(),
@@ -835,6 +1061,9 @@ fn read_log_tail(path: &Path, limit: usize) -> Vec<EnrollmentLogEvent> {
         .lines()
         .filter_map(|l| serde_json::from_str::<EnrollmentLogEvent>(l).ok())
         .collect();
+    for event in &mut events {
+        event.lab_key = event.lab_key.take().map(|key| mask_lab_key(&key));
+    }
     if events.len() > limit {
         events = events.split_off(events.len() - limit);
     }
@@ -878,6 +1107,42 @@ fn hash_otp(challenge_id: Uuid, code: &str) -> String {
     hex::encode(h.finalize())
 }
 
+fn classify_enroll_fail(err: &str) -> &'static str {
+    let e = err.to_ascii_lowercase();
+    if e.contains("banned") {
+        "banned_public_key"
+    } else if e.contains("maximum") || e.contains("already enrolled") {
+        "device_slot_full"
+    } else if e.contains("noise") {
+        "invalid_noise_key"
+    } else if e.contains("public_key") || e.contains("hex") {
+        "invalid_public_key"
+    } else {
+        "enroll_rejected"
+    }
+}
+
+fn classify_otp_start_fail(err: &str) -> &'static str {
+    let e = err.to_ascii_lowercase();
+    if e.contains("unknown lab key") {
+        "unknown_lab_key"
+    } else if e.contains("lab key disabled") {
+        "lab_key_disabled"
+    } else if e.contains("company disabled") {
+        "company_disabled"
+    } else if e.contains("company") && e.contains("not found") {
+        "lab_key_company_missing"
+    } else if e.contains("domain not allowed") {
+        "domain_not_allowed"
+    } else if e.contains("email") {
+        "invalid_email"
+    } else if e.contains("maximum") || e.contains("already enrolled") {
+        "device_slot_full"
+    } else {
+        "start_rejected"
+    }
+}
+
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -889,13 +1154,148 @@ pub async fn enroll_start(
     State(state): State<AppState>,
     Json(req): Json<EnrollStartRequest>,
 ) -> Result<(StatusCode, Json<EnrollStartResponse>), (StatusCode, Json<serde_json::Value>)> {
-    match state.otp.start(req) {
-        Ok(res) => Ok((StatusCode::OK, Json(res))),
-        Err(e) => Err((
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": e })),
-        )),
+    let enrollment = state.enrollment.clone();
+    let req_email = req
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let req_lab = req
+        .lab_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_uppercase());
+    let outcome = match state.otp.start(req, |email, max| {
+        enrollment.assert_email_device_slot(email, max, None)
+    }) {
+        Ok(o) => o,
+        Err(e) => {
+            let reason = classify_otp_start_fail(&e);
+            state.otp.audit(
+                "otp_start_fail",
+                req_email.as_deref(),
+                None,
+                None,
+                None,
+                req_lab.as_deref(),
+                Some(&format!("{reason}: {e}")),
+            );
+            let status = if e.contains("maximum") || e.contains("already enrolled") {
+                StatusCode::CONFLICT
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            return Err((status, Json(serde_json::json!({ "error": e }))));
+        }
+    };
+
+    let mut res = outcome.response;
+    if let Some(mut payload) = outcome.delivery {
+        let settings = state.settings.lock().unwrap().clone();
+        let (_, display_name) = crate::branding::company_lab_identity(
+            &state.data_dir,
+            &payload.company_id,
+            &payload.company_name,
+            &settings.display_name,
+        );
+        let (subject, body) = crate::branding::render_otp_notification(
+            &state.data_dir,
+            &payload.company_id,
+            &payload.company_name,
+            &display_name,
+            &payload.email,
+            &payload.code,
+            payload.expires_in_secs,
+        );
+        payload.subject = subject;
+        payload.body = body;
+        if settings.otp_webhook_configured() {
+            match crate::otp_delivery::deliver_enroll_otp(&settings, &payload).await {
+                Ok(true) => {
+                    state.otp.audit(
+                        "otp_delivery_ok",
+                        Some(&res.email),
+                        Some(&res.company_id),
+                        Some(&res.challenge_id.to_string()),
+                        None,
+                        None,
+                        Some("webhook_delivered"),
+                    );
+                    res.message =
+                        "Verification code sent. Check your work email for the one-time code."
+                            .into();
+                }
+                Ok(false) => {
+                    // Should not happen when configured; treat as misconfig.
+                    state.otp.drop_challenge(res.challenge_id);
+                    state.otp.audit(
+                        "otp_delivery_fail",
+                        Some(&res.email),
+                        Some(&res.company_id),
+                        Some(&res.challenge_id.to_string()),
+                        None,
+                        None,
+                        Some("webhook_not_configured"),
+                    );
+                    return Err((
+                        StatusCode::BAD_GATEWAY,
+                        Json(serde_json::json!({
+                            "error": "otp delivery webhook is not configured"
+                        })),
+                    ));
+                }
+                Err(e) => {
+                    state.otp.drop_challenge(res.challenge_id);
+                    state.otp.audit(
+                        "otp_delivery_fail",
+                        Some(&res.email),
+                        Some(&res.company_id),
+                        Some(&res.challenge_id.to_string()),
+                        None,
+                        None,
+                        Some(&format!("webhook_error: {e}")),
+                    );
+                    return Err((
+                        StatusCode::BAD_GATEWAY,
+                        Json(serde_json::json!({
+                            "error": format!("could not deliver verification code: {e}")
+                        })),
+                    ));
+                }
+            }
+        } else if outcome.via_lab_key {
+            // unreachable — delivery is None for lab keys
+        } else if res.lab_otp.is_some() {
+            state.otp.audit(
+                "otp_delivery_ok",
+                Some(&res.email),
+                Some(&res.company_id),
+                Some(&res.challenge_id.to_string()),
+                None,
+                None,
+                Some("lab_reveal"),
+            );
+            res.message =
+                "Verification code issued (lab reveal). Use lab_otp from this response.".into();
+        } else {
+            state.otp.audit(
+                "otp_delivery_fail",
+                Some(&res.email),
+                Some(&res.company_id),
+                Some(&res.challenge_id.to_string()),
+                None,
+                None,
+                Some("no_webhook_configured"),
+            );
+            res.message =
+                "Verification code issued. Configure an OTP delivery webhook to email codes."
+                    .into();
+        }
     }
+
+    Ok((StatusCode::OK, Json(res)))
 }
 
 pub async fn enroll_confirm(
@@ -903,22 +1303,57 @@ pub async fn enroll_confirm(
     Json(req): Json<EnrollConfirmRequest>,
 ) -> Result<(StatusCode, Json<EnrollResponse>), (StatusCode, Json<serde_json::Value>)> {
     let enrollment = state.enrollment.clone();
+    let otp = state.otp.clone();
+    let data_dir = state.data_dir.clone();
+    let global_display_name = state.settings.lock().unwrap().display_name.clone();
     match state.otp.confirm(req, |input| {
-        enrollment.enroll_verified(
-            input.case_id,
-            input.device_public_key,
-            input.noise_key,
-            input.platform,
-            input.model,
-            input.os_version,
-            input.email,
-            input.company_id,
-        )
+        let company = otp.get_company(&input.company_id);
+        let company_name = company
+            .as_ref()
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| input.company_id.clone());
+        let max = company
+            .as_ref()
+            .map(|c| c.max_devices_per_email)
+            .unwrap_or(1);
+        let (company_name, display_name) = crate::branding::company_lab_identity(
+            &data_dir,
+            &input.company_id,
+            &company_name,
+            &global_display_name,
+        );
+        enrollment
+            .enroll_verified_limited(
+                input.case_id,
+                input.device_public_key,
+                input.noise_key,
+                crate::enroll::DeviceClientMeta::from_enroll_fields(
+                    input.platform,
+                    input.model,
+                    input.os_version,
+                    input.app_version,
+                    input.manufacturer,
+                    input.brand,
+                    input.name,
+                    input.details,
+                ),
+                input.email,
+                input.company_id.clone(),
+                max,
+            )
+            .map(|mut res| {
+                res.company_id = input.company_id;
+                res.company_name = company_name;
+                res.display_name = display_name;
+                res
+            })
     }) {
         Ok((res, _)) => Ok((StatusCode::CREATED, Json(res))),
         Err(e) => {
             let status = if e.contains("banned") {
                 StatusCode::FORBIDDEN
+            } else if e.contains("maximum") || e.contains("already enrolled") {
+                StatusCode::CONFLICT
             } else {
                 StatusCode::BAD_REQUEST
             };

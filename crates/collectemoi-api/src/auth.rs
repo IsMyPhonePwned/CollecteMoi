@@ -32,7 +32,7 @@ const STAGE_FULL: &str = "full";
 const MFA_TTL_SECS: u64 = 10 * 60;
 const FULL_TTL_SECS: u64 = 12 * 60 * 60;
 const STATE_TTL_SECS: u64 = 5 * 60;
-/// No minimum policy length — admin chooses any non-empty password (confirmed in the UI).
+/// Bound password size to keep password hashing inputs predictable.
 const MAX_PASSWORD_CHARS: usize = 128;
 
 #[derive(Clone)]
@@ -102,21 +102,27 @@ impl FailGuard {
 }
 
 fn client_ip_from_headers(headers: &HeaderMap, peer: Option<std::net::SocketAddr>) -> String {
-    if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
-        let first = xff.split(',').next().unwrap_or(xff).trim();
-        if !first.is_empty() {
-            return first.to_string();
+    let peer_ip = peer.map(|addr| addr.ip());
+    // Only trust forwarded headers from a local reverse proxy. A remote client
+    // can set these headers itself and must not be able to evade IP throttles.
+    if peer_ip.is_some_and(|ip| ip.is_loopback()) {
+        if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+            let first = xff.split(',').next().unwrap_or(xff).trim();
+            if !first.is_empty() {
+                return first.to_string();
+            }
+        }
+        if let Some(real) = headers
+            .get("x-real-ip")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            return real.to_string();
         }
     }
-    if let Some(real) = headers
-        .get("x-real-ip")
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        return real.to_string();
-    }
-    peer.map(|a| a.ip().to_string())
+    peer_ip
+        .map(|ip| ip.to_string())
         .unwrap_or_else(|| "unknown".into())
 }
 
@@ -234,6 +240,22 @@ fn verify_password(password: &str, hash: &str) -> bool {
         .is_ok()
 }
 
+/// Confirm the admin password for destructive Settings actions (e.g. data wipe).
+pub fn require_admin_password(
+    state: &AppState,
+    password: &str,
+) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+    let account = state
+        .db
+        .admin_account_get()
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "db error"))?
+        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "setup required"))?;
+    if !verify_password(password, &account.password_hash) {
+        return Err(err(StatusCode::UNAUTHORIZED, "password incorrect"));
+    }
+    Ok(())
+}
+
 fn make_totp(
     secret_b32: &str,
     account: &str,
@@ -339,10 +361,11 @@ fn client_meta(headers: &HeaderMap) -> (String, String) {
 }
 
 fn validate_password(password: &str) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
-    if password.is_empty() {
+    let chars = password.chars().count();
+    if chars == 0 {
         return Err(err(StatusCode::BAD_REQUEST, "password is required"));
     }
-    if password.chars().count() > MAX_PASSWORD_CHARS {
+    if chars > MAX_PASSWORD_CHARS {
         return Err(err(StatusCode::BAD_REQUEST, "password too long"));
     }
     Ok(())
@@ -418,6 +441,25 @@ fn load_session(
     Ok(Some((token, sess)))
 }
 
+/// Lightweight actor check for access / connection logs (no session touch).
+/// Returns the admin username when a valid full-stage session cookie is present.
+pub fn admin_identity_for_log(state: &AppState, headers: &HeaderMap) -> Option<String> {
+    let token = extract_cookie(headers, COOKIE_NAME)?;
+    let hash = hash_token(&token);
+    let now = now_secs_str();
+    let sess = state.db.admin_session_get(&hash).ok().flatten()?;
+    if sess.expires_at < now || sess.stage != STAGE_FULL {
+        return None;
+    }
+    state
+        .db
+        .admin_account_get()
+        .ok()
+        .flatten()
+        .map(|a| a.username)
+        .or_else(|| Some("admin".into()))
+}
+
 fn require_stage(
     state: &AppState,
     headers: &HeaderMap,
@@ -462,6 +504,8 @@ fn path_needs_auth(path: &str) -> bool {
         return !path_is_public_auth(path);
     }
     path.starts_with("/v1/admin/")
+        || path == "/v1/blobs"
+        || path.starts_with("/v1/blobs/")
 }
 
 pub async fn require_admin(State(state): State<AppState>, req: Request, next: Next) -> Response {
@@ -609,7 +653,6 @@ pub async fn setup_finish(
             updated_at: now,
         })
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "account create failed"))?;
-
     let token = create_session(&state, STAGE_FULL, FULL_TTL_SECS, &headers)?;
     let secure = cookie_should_be_secure(&state, &headers);
     let mut res = Json(json!({
@@ -951,9 +994,6 @@ pub fn offline_reset_password(
     password: &str,
     clear_mfa: bool,
 ) -> anyhow::Result<OfflineResetReport> {
-    if password.is_empty() {
-        anyhow::bail!("password is required");
-    }
     if password.chars().count() > MAX_PASSWORD_CHARS {
         anyhow::bail!("password too long (max {MAX_PASSWORD_CHARS} characters)");
     }

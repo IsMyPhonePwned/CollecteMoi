@@ -191,7 +191,11 @@ impl UploadStore {
         fs::rename(tmp, path)?;
 
         meta.received[n as usize] = true;
-        self.write_meta(&meta)?;
+        // Hot path: update only the chunk bit in SQLite. Skip rewriting the
+        // operator mirror meta.json on every chunk (flushed on assemble).
+        self.db
+            .upload_mark_chunk_received(&id.to_string(), n)
+            .with_context(|| format!("mark chunk {n} for {id}"))?;
         Ok(meta)
     }
 
@@ -238,6 +242,29 @@ impl UploadStore {
 
     pub fn read_envelope(&self, id: Uuid) -> Result<Vec<u8>> {
         Ok(fs::read(self.envelope_path(id))?)
+    }
+
+    /// Remove an incomplete upload (chunks + meta) from disk and SQLite.
+    /// Refuses completed uploads — delete the blob instead.
+    pub fn delete_incomplete(&self, id: Uuid) -> Result<()> {
+        let lock = self.lock_for(id);
+        let _g = lock.lock().unwrap();
+        let meta = self.get(id)?;
+        if meta.complete {
+            bail!("upload is complete — delete the blob instead");
+        }
+        let sharded = self.shard_dir(id);
+        let flat = self.root.join("uploads").join(id.to_string());
+        if sharded.exists() {
+            fs::remove_dir_all(&sharded)?;
+        }
+        if flat.exists() {
+            fs::remove_dir_all(&flat)?;
+        }
+        let _ = self.db.upload_delete(&id.to_string())?;
+        let _ = self.db.job_delete_by_upload(&id.to_string())?;
+        self.locks.lock().unwrap().remove(&id);
+        Ok(())
     }
 
     /// Paginated list (newest-first).

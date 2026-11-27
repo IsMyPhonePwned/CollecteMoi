@@ -22,9 +22,11 @@ collectemoi-db = { workspace = true }
 collectemoi-envelope = { workspace = true }
 collectemoi-proto = { workspace = true }
 hex = { workspace = true }
+libc = "0.2"
 qrcode = { workspace = true }
 rand = { workspace = true }
 rcgen = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "aws-lc-rs"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

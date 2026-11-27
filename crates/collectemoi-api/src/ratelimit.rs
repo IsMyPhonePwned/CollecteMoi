@@ -1,10 +1,11 @@
 //! Basic in-process DDoS / abuse controls: per-IP rate limits, class budgets,
-//! and short automatic IP cool-downs after sustained 429 pressure.
+//! short automatic IP cool-downs after sustained 429 pressure, and per-device
+//! upload (report) quotas over a rolling hour.
 //!
 //! This is application-layer protection for a lab API. It does not replace
 //! network-edge DDoS mitigation (CDN, reverse proxy, firewalls).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -34,6 +35,10 @@ pub struct RateLimitConfig {
     pub seal_per_min: u32,
     /// Chunk uploads (many small requests).
     pub upload_per_min: u32,
+    /// New upload sessions (`POST /v1/uploads`) allowed per device id per window.
+    pub device_uploads_per_hour: u32,
+    /// Rolling window length for the per-device upload quota (seconds).
+    pub device_upload_window_secs: u64,
     /// After this many rate-limit hits in the ban window, cool the IP down.
     pub abuse_hits: u32,
     pub abuse_ban_secs: u64,
@@ -47,7 +52,9 @@ impl Default for RateLimitConfig {
             auth_per_min: 20,
             enroll_per_min: 30,
             seal_per_min: 12,
-            upload_per_min: 600,
+            upload_per_min: 3000,
+            device_uploads_per_hour: 10,
+            device_upload_window_secs: 3600,
             abuse_hits: 40,
             abuse_ban_secs: 120,
         }
@@ -153,10 +160,46 @@ impl IpState {
     }
 }
 
+#[derive(Debug, Default)]
+struct DeviceUploadWindow {
+    /// Timestamps of accepted `POST /v1/uploads` creates.
+    events: VecDeque<Instant>,
+    last_seen: Option<Instant>,
+}
+
+impl DeviceUploadWindow {
+    fn prune(&mut self, now: Instant, window: Duration) {
+        while let Some(front) = self.events.front() {
+            if now.duration_since(*front) > window {
+                self.events.pop_front();
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Returns Ok(()) and records the event, or Err(retry_after).
+    fn try_add(&mut self, now: Instant, limit: u32, window: Duration) -> Result<(), Duration> {
+        self.prune(now, window);
+        self.last_seen = Some(now);
+        if limit == 0 {
+            return Err(window);
+        }
+        if self.events.len() as u32 >= limit {
+            let oldest = self.events.front().copied().unwrap_or(now);
+            let retry = window.saturating_sub(now.duration_since(oldest));
+            return Err(retry.max(Duration::from_secs(1)));
+        }
+        self.events.push_back(now);
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 struct Inner {
     start: Instant,
     by_ip: HashMap<String, IpState>,
+    by_device: HashMap<String, DeviceUploadWindow>,
     last_gc: Instant,
 }
 
@@ -174,6 +217,7 @@ impl RateLimiter {
             inner: Arc::new(Mutex::new(Inner {
                 start: now,
                 by_ip: HashMap::new(),
+                by_device: HashMap::new(),
                 last_gc: now,
             })),
         }
@@ -181,6 +225,34 @@ impl RateLimiter {
 
     pub fn config(&self) -> &RateLimitConfig {
         &self.cfg
+    }
+
+    /// Rolling per-device quota for new upload sessions (one report / artefact).
+    /// `limit == 0` means unlimited. Independent of chunk PUT volume.
+    pub fn check_device_upload(&self, device_id: &str, limit: u32) -> Result<(), Duration> {
+        if !self.cfg.enabled || limit == 0 {
+            return Ok(());
+        }
+        let window = Duration::from_secs(self.cfg.device_upload_window_secs.max(60));
+        let key = device_id.trim();
+        if key.is_empty() {
+            return Ok(());
+        }
+
+        let mut g = self.inner.lock().unwrap();
+        let now = Instant::now();
+        if now.duration_since(g.last_gc) > Duration::from_secs(120) {
+            g.by_ip
+                .retain(|_, st| now.duration_since(st.last_seen) < Duration::from_secs(300));
+            g.by_device.retain(|_, st| {
+                st.last_seen
+                    .is_some_and(|t| now.duration_since(t) < window + Duration::from_secs(300))
+            });
+            g.last_gc = now;
+        }
+
+        let st = g.by_device.entry(key.to_string()).or_default();
+        st.try_add(now, limit, window)
     }
 
     fn classify(method: &str, path: &str) -> TrafficClass {
@@ -288,28 +360,35 @@ impl RateLimiter {
 }
 
 fn client_ip(req: &Request) -> String {
-    if let Some(xff) = req
-        .headers()
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-    {
-        let first = xff.split(',').next().unwrap_or(xff).trim();
-        if !first.is_empty() {
-            return first.to_string();
+    let peer_ip = req
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|connect| connect.0.ip());
+    // Forwarded headers are only trusted from a loopback reverse proxy;
+    // otherwise the remote client could spoof a fresh address on every call.
+    if peer_ip.is_some_and(|ip| ip.is_loopback()) {
+        if let Some(xff) = req
+            .headers()
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+        {
+            let first = xff.split(',').next().unwrap_or(xff).trim();
+            if !first.is_empty() {
+                return first.to_string();
+            }
+        }
+        if let Some(real) = req
+            .headers()
+            .get("x-real-ip")
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            return real.to_string();
         }
     }
-    if let Some(real) = req
-        .headers()
-        .get("x-real-ip")
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        return real.to_string();
-    }
-    req.extensions()
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|c| c.0.ip().to_string())
+    peer_ip
+        .map(|ip| ip.to_string())
         .unwrap_or_else(|| "unknown".into())
 }
 
@@ -392,5 +471,19 @@ mod tests {
         assert!(lim.check("1.2.3.4", TrafficClass::General).is_err());
         // Other IP unaffected
         assert!(lim.check("9.9.9.9", TrafficClass::General).is_ok());
+    }
+
+    #[test]
+    fn device_upload_quota_is_per_device() {
+        let lim = RateLimiter::new(RateLimitConfig {
+            device_uploads_per_hour: 2,
+            device_upload_window_secs: 3600,
+            ..RateLimitConfig::default()
+        });
+        assert!(lim.check_device_upload("dev-a", 2).is_ok());
+        assert!(lim.check_device_upload("dev-a", 2).is_ok());
+        assert!(lim.check_device_upload("dev-a", 2).is_err());
+        assert!(lim.check_device_upload("dev-b", 2).is_ok());
+        assert!(lim.check_device_upload("dev-a", 0).is_ok()); // unlimited
     }
 }

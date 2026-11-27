@@ -10,6 +10,7 @@
 mod backup;
 mod ids;
 mod migrate;
+mod pool;
 mod schema;
 
 pub use backup::{
@@ -20,34 +21,47 @@ pub use ids::{IdError, like_contains, parse_uuid_id, reject_path_chars, safe_fil
 pub use migrate::ImportStats;
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+
+use pool::{PooledConnection, SqlitePool, open_connection};
+
+/// Default SQLite pool size when callers pass `0` (auto).
+pub fn default_pool_size() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().saturating_mul(4))
+        .unwrap_or(16)
+        .clamp(8, 64)
+}
 
 #[derive(Clone)]
 pub struct Db {
     path: PathBuf,
-    conn: Arc<Mutex<Connection>>,
+    pool: SqlitePool,
 }
 
 impl Db {
     /// Open (or create) `<data_dir>/collectemoi.db`, migrate schema, import legacy files once.
     pub fn open(data_dir: &Path) -> Result<Self> {
+        Self::open_with_pool_size(data_dir, 0)
+    }
+
+    /// Like [`open`](Self::open) with an explicit connection pool size (`0` = auto).
+    pub fn open_with_pool_size(data_dir: &Path, pool_size: usize) -> Result<Self> {
         std::fs::create_dir_all(data_dir)?;
         let path = data_dir.join("collectemoi.db");
-        let conn =
-            Connection::open(&path).with_context(|| format!("open sqlite {}", path.display()))?;
-        conn.execute_batch(
-            "PRAGMA journal_mode=WAL;
-             PRAGMA synchronous=NORMAL;
-             PRAGMA foreign_keys=ON;
-             PRAGMA busy_timeout=5000;",
-        )?;
+        let conn = open_connection(&path)?;
         conn.execute_batch(schema::DDL)?;
         ensure_lab_keys_company_id(&conn)?;
         ensure_companies_color(&conn)?;
+        ensure_companies_max_devices_per_email(&conn)?;
+        ensure_companies_device_uploads_per_hour(&conn)?;
+        ensure_access_events_admin(&conn)?;
+        ensure_devices_client_meta(&conn)?;
+        ensure_devices_rate_limit_bypass(&conn)?;
+        ensure_access_events_client_meta(&conn)?;
         {
             let applied: Option<i64> = conn
                 .query_row(
@@ -64,10 +78,14 @@ impl Db {
             }
         }
 
-        let db = Self {
-            path,
-            conn: Arc::new(Mutex::new(conn)),
+        let max = if pool_size == 0 {
+            default_pool_size()
+        } else {
+            pool_size.clamp(2, 128)
         };
+        let pool = SqlitePool::new(path.clone(), conn, max);
+        let db = Self { path, pool };
+        tracing::info!(db = %db.path.display(), pool_size = max, "sqlite pool ready");
         let stats = db.import_legacy_files(data_dir)?;
         if stats.devices
             + stats.uploads
@@ -99,10 +117,18 @@ impl Db {
         &self.path
     }
 
+    pub fn pool_size(&self) -> usize {
+        self.pool.max_size()
+    }
+
+    pub(crate) fn acquire(&self) -> Result<PooledConnection> {
+        self.pool.acquire()
+    }
+
     /* ── settings ─────────────────────────────────────────────── */
 
     pub fn setting_get(&self, key: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.query_row(
             "SELECT value FROM settings WHERE key = ?1",
             params![key],
@@ -113,7 +139,7 @@ impl Db {
     }
 
     pub fn setting_set(&self, key: &str, value: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "INSERT INTO settings (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -125,7 +151,7 @@ impl Db {
     /* ── uploads ──────────────────────────────────────────────── */
 
     pub fn upload_upsert(&self, meta: &UploadRow) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "INSERT INTO uploads (
                 upload_id, case_id, artefact, total_size, chunk_size, chunk_count,
@@ -160,7 +186,7 @@ impl Db {
     }
 
     pub fn upload_get(&self, upload_id: &str) -> Result<Option<UploadRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.query_row(
             "SELECT upload_id, case_id, artefact, total_size, chunk_size, chunk_count,
                     ciphertext_sha256, received_json, complete, created_at, completed_at
@@ -175,7 +201,7 @@ impl Db {
     pub fn upload_list(&self, limit: usize, offset: usize) -> Result<(Vec<UploadRow>, usize)> {
         let limit = limit.clamp(1, 1000) as i64;
         let offset = offset as i64;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let total: usize = conn.query_row("SELECT COUNT(*) FROM uploads", [], |r| {
             r.get::<_, i64>(0).map(|n| n as usize)
         })?;
@@ -193,7 +219,7 @@ impl Db {
     }
 
     pub fn upload_counts(&self) -> Result<(usize, usize)> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let total: i64 = conn.query_row("SELECT COUNT(*) FROM uploads", [], |r| r.get(0))?;
         let complete: i64 =
             conn.query_row("SELECT COUNT(*) FROM uploads WHERE complete = 1", [], |r| {
@@ -202,10 +228,63 @@ impl Db {
         Ok((total as usize, complete as usize))
     }
 
+    pub fn upload_delete(&self, upload_id: &str) -> Result<bool> {
+        let conn = self.acquire()?;
+        let n = conn.execute("DELETE FROM uploads WHERE upload_id = ?1", params![upload_id])?;
+        Ok(n > 0)
+    }
+
+    /// Hot path: flip one chunk bit without rewriting the whole upload row.
+    /// Prefers JSON1 `json_set`; falls back to read/modify/write.
+    pub fn upload_mark_chunk_received(&self, upload_id: &str, chunk_index: u32) -> Result<()> {
+        let conn = self.acquire()?;
+        let complete: Option<i64> = conn
+            .query_row(
+                "SELECT complete FROM uploads WHERE upload_id = ?1",
+                params![upload_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        match complete {
+            None => anyhow::bail!("upload {upload_id} not found"),
+            Some(c) if c != 0 => anyhow::bail!("upload already complete"),
+            Some(_) => {}
+        }
+
+        let path = format!("$[{chunk_index}]");
+        if conn
+            .execute(
+                "UPDATE uploads SET received_json = json_set(received_json, ?1, json('true'))
+                 WHERE upload_id = ?2 AND complete = 0",
+                params![path, upload_id],
+            )
+            .is_ok()
+        {
+            return Ok(());
+        }
+
+        let received_json: String = conn.query_row(
+            "SELECT received_json FROM uploads WHERE upload_id = ?1",
+            params![upload_id],
+            |r| r.get(0),
+        )?;
+        let mut received: Vec<bool> = serde_json::from_str(&received_json).unwrap_or_default();
+        let idx = chunk_index as usize;
+        if idx >= received.len() {
+            anyhow::bail!("chunk index out of range");
+        }
+        received[idx] = true;
+        conn.execute(
+            "UPDATE uploads SET received_json = ?1 WHERE upload_id = ?2 AND complete = 0",
+            params![serde_json::to_string(&received)?, upload_id],
+        )?;
+        Ok(())
+    }
+
     /* ── blobs ────────────────────────────────────────────────── */
 
     pub fn blob_upsert(&self, meta: &BlobRow) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "INSERT INTO blobs (
                 blob_id, upload_id, case_id, artefact, size, sha256, created_at, queued_at,
@@ -240,7 +319,7 @@ impl Db {
     }
 
     pub fn blob_get(&self, blob_id: &str) -> Result<Option<BlobRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.query_row(
             "SELECT blob_id, upload_id, case_id, artefact, size, sha256, created_at, queued_at,
                     device_public_key, filename, content_type
@@ -253,7 +332,7 @@ impl Db {
     }
 
     pub fn blob_delete(&self, blob_id: &str) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let n = conn.execute("DELETE FROM blobs WHERE blob_id = ?1", params![blob_id])?;
         Ok(n > 0)
     }
@@ -269,7 +348,7 @@ impl Db {
         let offset = offset as i64;
         let case = case_id.map(str::trim).filter(|s| !s.is_empty());
         let art = artefact.map(str::trim).filter(|s| !s.is_empty());
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
 
         let (total, rows) = match (case, art) {
             (Some(c), Some(a)) => {
@@ -340,13 +419,13 @@ impl Db {
     }
 
     pub fn blob_count(&self) -> Result<usize> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let n: i64 = conn.query_row("SELECT COUNT(*) FROM blobs", [], |r| r.get(0))?;
         Ok(n as usize)
     }
 
     pub fn blobs_for_device_pubkey(&self, public_key: &str) -> Result<Vec<BlobRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let mut stmt = conn.prepare(
             "SELECT blob_id, upload_id, case_id, artefact, size, sha256, created_at, queued_at,
                     device_public_key, filename, content_type
@@ -362,7 +441,7 @@ impl Db {
     /* ── jobs ─────────────────────────────────────────────────── */
 
     pub fn job_enqueue(&self, job: &JobRow) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "INSERT INTO jobs (
                 upload_id, case_id, artefact, envelope_path, device_public_key, queued_at, status
@@ -391,7 +470,7 @@ impl Db {
 
     pub fn job_list_pending(&self, limit: usize) -> Result<Vec<JobRow>> {
         let limit = limit.clamp(1, 1000) as i64;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let mut stmt = conn.prepare(
             "SELECT upload_id, case_id, artefact, envelope_path, device_public_key, queued_at, status,
                     claimed_at, finished_at, error
@@ -406,7 +485,7 @@ impl Db {
 
     /// Atomically claim a pending job. Returns the job if claimed.
     pub fn job_claim(&self, upload_id: &str) -> Result<Option<JobRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let n = conn.execute(
             "UPDATE jobs SET status = 'claimed', claimed_at = ?1
              WHERE upload_id = ?2 AND status = 'pending'",
@@ -426,8 +505,48 @@ impl Db {
         .map_err(Into::into)
     }
 
+    /// Claim up to `limit` pending jobs in one transaction (worker batching).
+    pub fn job_claim_batch(&self, limit: usize) -> Result<Vec<JobRow>> {
+        let limit = limit.clamp(1, 256);
+        let conn = self.acquire()?;
+        let tx = conn.unchecked_transaction()?;
+        let ids: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT upload_id FROM jobs WHERE status = 'pending'
+                 ORDER BY queued_at ASC LIMIT ?1",
+            )?;
+            let rows = stmt.query_map(params![limit as i64], |r| r.get(0))?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let claimed_at = now_secs_str();
+        let mut out = Vec::with_capacity(ids.len());
+        for upload_id in ids {
+            let n = tx.execute(
+                "UPDATE jobs SET status = 'claimed', claimed_at = ?1
+                 WHERE upload_id = ?2 AND status = 'pending'",
+                params![claimed_at, upload_id],
+            )?;
+            if n == 0 {
+                continue;
+            }
+            let job = tx.query_row(
+                "SELECT upload_id, case_id, artefact, envelope_path, device_public_key, queued_at, status,
+                        claimed_at, finished_at, error
+                 FROM jobs WHERE upload_id = ?1",
+                params![upload_id],
+                row_to_job,
+            )?;
+            out.push(job);
+        }
+        tx.commit()?;
+        Ok(out)
+    }
+
     pub fn job_mark_done(&self, upload_id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "UPDATE jobs SET status = 'done', finished_at = ?1, error = NULL WHERE upload_id = ?2",
             params![now_secs_str(), upload_id],
@@ -436,7 +555,7 @@ impl Db {
     }
 
     pub fn job_mark_failed(&self, upload_id: &str, error: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "UPDATE jobs SET status = 'failed', finished_at = ?1, error = ?2 WHERE upload_id = ?3",
             params![now_secs_str(), error, upload_id],
@@ -444,8 +563,13 @@ impl Db {
         Ok(())
     }
 
+    pub fn job_delete_by_upload(&self, upload_id: &str) -> Result<usize> {
+        let conn = self.acquire()?;
+        Ok(conn.execute("DELETE FROM jobs WHERE upload_id = ?1", params![upload_id])?)
+    }
+
     pub fn job_count_pending(&self) -> Result<usize> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM jobs WHERE status IN ('pending','claimed')",
             [],
@@ -456,7 +580,7 @@ impl Db {
 
     pub fn job_list_all(&self, limit: usize) -> Result<Vec<JobRow>> {
         let limit = limit.clamp(1, 1000) as i64;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let mut stmt = conn.prepare(
             "SELECT upload_id, case_id, artefact, envelope_path, device_public_key, queued_at, status,
                     claimed_at, finished_at, error
@@ -475,7 +599,7 @@ impl Db {
         limit: usize,
     ) -> Result<Vec<DeviceSubmissionRow>> {
         let limit = limit.clamp(1, 500) as i64;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let mut stmt = conn.prepare(
             "SELECT j.upload_id, j.artefact, COALESCE(u.total_size, 0), j.queued_at,
                     j.status
@@ -502,12 +626,14 @@ impl Db {
     /* ── devices ──────────────────────────────────────────────── */
 
     pub fn device_upsert(&self, d: &DeviceRow) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "INSERT INTO devices (
                 device_id, case_id, public_key, noise_key, noise_key_fingerprint,
-                platform, model, os_version, enrolled_at, banned, email, company_id
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)
+                platform, model, os_version, enrolled_at, banned, email, company_id,
+                app_version, manufacturer, brand, device_name, details_json, last_seen_at,
+                rate_limit_bypass
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)
              ON CONFLICT(device_id) DO UPDATE SET
                 case_id=excluded.case_id,
                 public_key=excluded.public_key,
@@ -519,7 +645,17 @@ impl Db {
                 enrolled_at=excluded.enrolled_at,
                 banned=excluded.banned,
                 email=excluded.email,
-                company_id=excluded.company_id",
+                company_id=excluded.company_id,
+                app_version=excluded.app_version,
+                manufacturer=excluded.manufacturer,
+                brand=excluded.brand,
+                device_name=excluded.device_name,
+                details_json=excluded.details_json,
+                rate_limit_bypass=excluded.rate_limit_bypass,
+                last_seen_at=CASE
+                    WHEN excluded.last_seen_at != '' THEN excluded.last_seen_at
+                    ELSE devices.last_seen_at
+                END",
             params![
                 d.device_id,
                 d.case_id,
@@ -533,18 +669,79 @@ impl Db {
                 if d.banned { 1 } else { 0 },
                 d.email,
                 d.company_id,
+                d.app_version,
+                d.manufacturer,
+                d.brand,
+                d.device_name,
+                d.details_json,
+                d.last_seen_at,
+                if d.rate_limit_bypass { 1 } else { 0 },
             ],
         )?;
         Ok(())
     }
 
-    pub fn device_list(&self) -> Result<Vec<DeviceRow>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT device_id, case_id, public_key, noise_key, noise_key_fingerprint,
-                    platform, model, os_version, enrolled_at, banned, email, company_id
-             FROM devices ORDER BY enrolled_at ASC",
+    /// Update last_seen + client version/platform from request headers.
+    pub fn device_touch(
+        &self,
+        device_id: &str,
+        app_version: &str,
+        platform: &str,
+        model: &str,
+        os_version: &str,
+        manufacturer: &str,
+        brand: &str,
+        device_name: &str,
+        last_seen_at: &str,
+    ) -> Result<()> {
+        let conn = self.acquire()?;
+        conn.execute(
+            "UPDATE devices SET
+                last_seen_at = CASE WHEN ?9 != '' THEN ?9 ELSE last_seen_at END,
+                app_version = CASE WHEN ?2 != '' THEN ?2 ELSE app_version END,
+                platform = CASE WHEN ?3 != '' THEN ?3 ELSE platform END,
+                model = CASE WHEN ?4 != '' THEN ?4 ELSE model END,
+                os_version = CASE WHEN ?5 != '' THEN ?5 ELSE os_version END,
+                manufacturer = CASE WHEN ?6 != '' THEN ?6 ELSE manufacturer END,
+                brand = CASE WHEN ?7 != '' THEN ?7 ELSE brand END,
+                device_name = CASE WHEN ?8 != '' THEN ?8 ELSE device_name END
+             WHERE device_id = ?1",
+            params![
+                device_id,
+                app_version,
+                platform,
+                model,
+                os_version,
+                manufacturer,
+                brand,
+                device_name,
+                last_seen_at
+            ],
         )?;
+        Ok(())
+    }
+
+    pub fn device_set_details_json(&self, device_id: &str, details_json: &str) -> Result<()> {
+        let conn = self.acquire()?;
+        conn.execute(
+            "UPDATE devices SET details_json = ?2 WHERE device_id = ?1",
+            params![device_id, details_json],
+        )?;
+        Ok(())
+    }
+
+    const DEVICE_SELECT: &'static str = "device_id, case_id, public_key, noise_key, noise_key_fingerprint,
+                    platform, model, os_version, enrolled_at, banned, email, company_id,
+                    app_version, manufacturer, brand, device_name, details_json, last_seen_at,
+                    rate_limit_bypass";
+
+    pub fn device_list(&self) -> Result<Vec<DeviceRow>> {
+        let conn = self.acquire()?;
+        let sql = format!(
+            "SELECT {} FROM devices ORDER BY enrolled_at ASC",
+            Self::DEVICE_SELECT.replace('\n', " ")
+        );
+        let mut stmt = conn.prepare(&sql)?;
         let rows = stmt
             .query_map([], row_to_device)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -552,33 +749,29 @@ impl Db {
     }
 
     pub fn device_get(&self, device_id: &str) -> Result<Option<DeviceRow>> {
-        let conn = self.conn.lock().unwrap();
-        conn.query_row(
-            "SELECT device_id, case_id, public_key, noise_key, noise_key_fingerprint,
-                    platform, model, os_version, enrolled_at, banned, email, company_id
-             FROM devices WHERE device_id = ?1",
-            params![device_id],
-            row_to_device,
-        )
-        .optional()
-        .map_err(Into::into)
+        let conn = self.acquire()?;
+        let sql = format!(
+            "SELECT {} FROM devices WHERE device_id = ?1",
+            Self::DEVICE_SELECT.replace('\n', " ")
+        );
+        conn.query_row(&sql, params![device_id], row_to_device)
+            .optional()
+            .map_err(Into::into)
     }
 
     pub fn device_find_by_pubkey(&self, public_key: &str) -> Result<Option<DeviceRow>> {
-        let conn = self.conn.lock().unwrap();
-        conn.query_row(
-            "SELECT device_id, case_id, public_key, noise_key, noise_key_fingerprint,
-                    platform, model, os_version, enrolled_at, banned, email, company_id
-             FROM devices WHERE lower(public_key) = lower(?1) LIMIT 1",
-            params![public_key],
-            row_to_device,
-        )
-        .optional()
-        .map_err(Into::into)
+        let conn = self.acquire()?;
+        let sql = format!(
+            "SELECT {} FROM devices WHERE lower(public_key) = lower(?1) LIMIT 1",
+            Self::DEVICE_SELECT.replace('\n', " ")
+        );
+        conn.query_row(&sql, params![public_key], row_to_device)
+            .optional()
+            .map_err(Into::into)
     }
 
     pub fn device_set_banned(&self, device_id: &str, banned: bool) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "UPDATE devices SET banned = ?1 WHERE device_id = ?2",
             params![if banned { 1 } else { 0 }, device_id],
@@ -586,8 +779,17 @@ impl Db {
         Ok(())
     }
 
+    pub fn device_set_rate_limit_bypass(&self, device_id: &str, bypass: bool) -> Result<()> {
+        let conn = self.acquire()?;
+        conn.execute(
+            "UPDATE devices SET rate_limit_bypass = ?1 WHERE device_id = ?2",
+            params![if bypass { 1 } else { 0 }, device_id],
+        )?;
+        Ok(())
+    }
+
     pub fn device_ban_matching_pubkey(&self, public_key: &str, banned: bool) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "UPDATE devices SET banned = ?1 WHERE lower(public_key) = lower(?2)",
             params![if banned { 1 } else { 0 }, public_key],
@@ -598,7 +800,7 @@ impl Db {
     /* ── banned keys ──────────────────────────────────────────── */
 
     pub fn banned_upsert(&self, public_key: &str, banned_at: &str, reason: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "INSERT INTO banned_public_keys (public_key, banned_at, reason) VALUES (?1,?2,?3)
              ON CONFLICT(public_key) DO UPDATE SET banned_at=excluded.banned_at, reason=excluded.reason",
@@ -608,7 +810,7 @@ impl Db {
     }
 
     pub fn banned_remove(&self, public_key: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "DELETE FROM banned_public_keys WHERE public_key = ?1",
             params![public_key],
@@ -617,7 +819,7 @@ impl Db {
     }
 
     pub fn banned_list(&self) -> Result<Vec<BannedKeyRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let mut stmt = conn.prepare(
             "SELECT public_key, banned_at, reason FROM banned_public_keys ORDER BY banned_at ASC",
         )?;
@@ -634,7 +836,7 @@ impl Db {
     }
 
     pub fn banned_contains(&self, public_key: &str) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let n: i64 = conn.query_row(
             "SELECT COUNT(*) FROM banned_public_keys WHERE lower(public_key) = lower(?1)",
             params![public_key],
@@ -646,17 +848,19 @@ impl Db {
     /* ── companies / lab keys ─────────────────────────────────── */
 
     pub fn company_upsert(&self, c: &CompanyRow) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
-            "INSERT INTO companies (id, name, domains_json, case_id, enabled, updated_at, color)
-             VALUES (?1,?2,?3,?4,?5,?6,?7)
+            "INSERT INTO companies (id, name, domains_json, case_id, enabled, updated_at, color, max_devices_per_email, device_uploads_per_hour)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)
              ON CONFLICT(id) DO UPDATE SET
                 name=excluded.name,
                 domains_json=excluded.domains_json,
                 case_id=excluded.case_id,
                 enabled=excluded.enabled,
                 updated_at=excluded.updated_at,
-                color=excluded.color",
+                color=excluded.color,
+                max_devices_per_email=excluded.max_devices_per_email,
+                device_uploads_per_hour=excluded.device_uploads_per_hour",
             params![
                 c.id,
                 c.name,
@@ -665,15 +869,17 @@ impl Db {
                 if c.enabled { 1 } else { 0 },
                 c.updated_at,
                 c.color,
+                c.max_devices_per_email as i64,
+                c.device_uploads_per_hour as i64,
             ],
         )?;
         Ok(())
     }
 
     pub fn company_list(&self) -> Result<Vec<CompanyRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, domains_json, case_id, enabled, updated_at, color FROM companies ORDER BY id",
+            "SELECT id, name, domains_json, case_id, enabled, updated_at, color, max_devices_per_email, device_uploads_per_hour FROM companies ORDER BY id",
         )?;
         let rows = stmt
             .query_map([], row_to_company)?
@@ -682,22 +888,22 @@ impl Db {
     }
 
     pub fn company_get(&self, id: &str) -> Result<Option<CompanyRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, domains_json, case_id, enabled, updated_at, color FROM companies WHERE id = ?1",
+            "SELECT id, name, domains_json, case_id, enabled, updated_at, color, max_devices_per_email, device_uploads_per_hour FROM companies WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![id], row_to_company)?;
         Ok(rows.next().transpose()?)
     }
 
     pub fn company_delete(&self, id: &str) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let n = conn.execute("DELETE FROM companies WHERE id = ?1", params![id])?;
         Ok(n > 0)
     }
 
     pub fn lab_key_upsert(&self, k: &LabKeyRow) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "INSERT INTO lab_keys (key, label, email, case_id, reusable, enabled, updated_at, company_id)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
@@ -724,7 +930,7 @@ impl Db {
     }
 
     pub fn lab_key_list(&self) -> Result<Vec<LabKeyRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let mut stmt = conn.prepare(
             "SELECT key, label, email, case_id, reusable, enabled, updated_at, company_id FROM lab_keys ORDER BY key",
         )?;
@@ -735,7 +941,7 @@ impl Db {
     }
 
     pub fn lab_key_get(&self, key: &str) -> Result<Option<LabKeyRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.query_row(
             "SELECT key, label, email, case_id, reusable, enabled, updated_at, company_id
              FROM lab_keys WHERE key = ?1",
@@ -747,7 +953,7 @@ impl Db {
     }
 
     pub fn lab_key_delete(&self, key: &str) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let n = conn.execute("DELETE FROM lab_keys WHERE key = ?1", params![key])?;
         Ok(n > 0)
     }
@@ -755,11 +961,12 @@ impl Db {
     /* ── access / enrollment logs ─────────────────────────────── */
 
     pub fn access_record(&self, e: &AccessEventRow) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "INSERT INTO access_events (
-                ts, method, path, status, duration_ms, remote, user_agent, device_id, kind, resource_id
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+                ts, method, path, status, duration_ms, remote, user_agent, device_id, kind, resource_id,
+                is_admin, admin_user, app_version, platform, model, os_version
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
             params![
                 e.ts,
                 e.method,
@@ -771,9 +978,32 @@ impl Db {
                 e.device_id,
                 e.kind,
                 e.resource_id,
+                if e.is_admin { 1 } else { 0 },
+                e.admin_user,
+                e.app_version,
+                e.platform,
+                e.model,
+                e.os_version,
             ],
         )?;
         Ok(())
+    }
+
+    /// Access events at or after `since_ts` (unix-seconds string), newest first.
+    pub fn access_since(&self, since_ts: &str, limit: usize) -> Result<Vec<AccessEventRow>> {
+        let limit = limit.clamp(1, 20_000) as i64;
+        let since = since_ts.trim();
+        let conn = self.acquire()?;
+        let mut stmt = conn.prepare(
+            "SELECT ts, method, path, status, duration_ms, remote, user_agent, device_id, kind, resource_id, is_admin, admin_user, app_version, platform, model, os_version
+             FROM access_events
+             WHERE CAST(ts AS INTEGER) >= CAST(?1 AS INTEGER)
+             ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = stmt
+            .query_map(params![since, limit], row_to_access)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
 
     pub fn access_list(
@@ -785,13 +1015,13 @@ impl Db {
         let limit = limit.clamp(1, 1000) as i64;
         let kind = kind.map(str::trim).filter(|s| !s.is_empty());
         let remote = remote_substr.map(str::trim).filter(|s| !s.is_empty());
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
 
         match (kind, remote) {
             (Some(k), Some(r)) => {
                 let pattern = like_contains(r);
                 let mut stmt = conn.prepare(
-                    "SELECT ts, method, path, status, duration_ms, remote, user_agent, device_id, kind, resource_id
+                    "SELECT ts, method, path, status, duration_ms, remote, user_agent, device_id, kind, resource_id, is_admin, admin_user, app_version, platform, model, os_version
                      FROM access_events
                      WHERE kind = ?1 AND remote LIKE ?2 ESCAPE '\\'
                      ORDER BY id DESC LIMIT ?3",
@@ -803,7 +1033,7 @@ impl Db {
             }
             (Some(k), None) => {
                 let mut stmt = conn.prepare(
-                    "SELECT ts, method, path, status, duration_ms, remote, user_agent, device_id, kind, resource_id
+                    "SELECT ts, method, path, status, duration_ms, remote, user_agent, device_id, kind, resource_id, is_admin, admin_user, app_version, platform, model, os_version
                      FROM access_events WHERE kind = ?1
                      ORDER BY id DESC LIMIT ?2",
                 )?;
@@ -815,7 +1045,7 @@ impl Db {
             (None, Some(r)) => {
                 let pattern = like_contains(r);
                 let mut stmt = conn.prepare(
-                    "SELECT ts, method, path, status, duration_ms, remote, user_agent, device_id, kind, resource_id
+                    "SELECT ts, method, path, status, duration_ms, remote, user_agent, device_id, kind, resource_id, is_admin, admin_user, app_version, platform, model, os_version
                      FROM access_events
                      WHERE remote LIKE ?1 ESCAPE '\\'
                      ORDER BY id DESC LIMIT ?2",
@@ -827,7 +1057,7 @@ impl Db {
             }
             (None, None) => {
                 let mut stmt = conn.prepare(
-                    "SELECT ts, method, path, status, duration_ms, remote, user_agent, device_id, kind, resource_id
+                    "SELECT ts, method, path, status, duration_ms, remote, user_agent, device_id, kind, resource_id, is_admin, admin_user, app_version, platform, model, os_version
                      FROM access_events ORDER BY id DESC LIMIT ?1",
                 )?;
                 let rows = stmt
@@ -844,9 +1074,9 @@ impl Db {
         limit: usize,
     ) -> Result<Vec<AccessEventRow>> {
         let limit = limit.clamp(1, 500) as i64;
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let mut stmt = conn.prepare(
-            "SELECT ts, method, path, status, duration_ms, remote, user_agent, device_id, kind, resource_id
+            "SELECT ts, method, path, status, duration_ms, remote, user_agent, device_id, kind, resource_id, is_admin, admin_user, app_version, platform, model, os_version
              FROM access_events WHERE resource_id = ?1
              ORDER BY id DESC LIMIT ?2",
         )?;
@@ -856,8 +1086,34 @@ impl Db {
         Ok(rows)
     }
 
+    /// Delete collected evidence rows (uploads / jobs / blobs). Disk files cleared separately.
+    pub fn purge_collected(&self) -> Result<(usize, usize, usize)> {
+        let conn = self.acquire()?;
+        let jobs = conn.execute("DELETE FROM jobs", [])?;
+        let uploads = conn.execute("DELETE FROM uploads", [])?;
+        let blobs = conn.execute("DELETE FROM blobs", [])?;
+        Ok((blobs, uploads, jobs))
+    }
+
+    pub fn purge_access_events(&self) -> Result<usize> {
+        let conn = self.acquire()?;
+        Ok(conn.execute("DELETE FROM access_events", [])?)
+    }
+
+    pub fn purge_enrollment_events(&self) -> Result<usize> {
+        let conn = self.acquire()?;
+        let n = conn.execute("DELETE FROM enrollment_events", [])?;
+        let _ = conn.execute("DELETE FROM otp_challenges", [])?;
+        Ok(n)
+    }
+
+    pub fn purge_devices(&self) -> Result<usize> {
+        let conn = self.acquire()?;
+        Ok(conn.execute("DELETE FROM devices", [])?)
+    }
+
     pub fn enrollment_log(&self, e: &EnrollmentEventRow) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "INSERT INTO enrollment_events (
                 ts, event, email, company_id, challenge_id, device_id, lab_key, detail
@@ -877,8 +1133,8 @@ impl Db {
     }
 
     pub fn enrollment_list(&self, limit: usize) -> Result<Vec<EnrollmentEventRow>> {
-        let limit = limit.clamp(1, 1000) as i64;
-        let conn = self.conn.lock().unwrap();
+        let limit = limit.clamp(1, 10_000) as i64;
+        let conn = self.acquire()?;
         let mut stmt = conn.prepare(
             "SELECT ts, event, email, company_id, challenge_id, device_id, lab_key, detail
              FROM enrollment_events ORDER BY id DESC LIMIT ?1",
@@ -903,7 +1159,7 @@ impl Db {
     /* ── OTP challenges (durable) ─────────────────────────────── */
 
     pub fn challenge_upsert(&self, c: &ChallengeRow) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "INSERT INTO otp_challenges (
                 id, email, company_id, case_id, code_hash, code_plain, expires_at, used, via_lab_key
@@ -933,7 +1189,7 @@ impl Db {
     }
 
     pub fn challenge_get(&self, id: &str) -> Result<Option<ChallengeRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.query_row(
             "SELECT id, email, company_id, case_id, code_hash, code_plain, expires_at, used, via_lab_key
              FROM otp_challenges WHERE id = ?1",
@@ -945,7 +1201,7 @@ impl Db {
     }
 
     pub fn challenge_mark_used(&self, id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "UPDATE otp_challenges SET used = 1 WHERE id = ?1",
             params![id],
@@ -956,7 +1212,7 @@ impl Db {
     /* ── admin auth ───────────────────────────────────────────── */
 
     pub fn admin_account_get(&self) -> Result<Option<AdminAccountRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.query_row(
             "SELECT username, password_hash, totp_secret, totp_enabled, created_at, updated_at
              FROM admin_account WHERE id = 1",
@@ -977,7 +1233,7 @@ impl Db {
     }
 
     pub fn admin_account_upsert(&self, row: &AdminAccountRow) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "INSERT INTO admin_account (id, username, password_hash, totp_secret, totp_enabled, created_at, updated_at)
              VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)
@@ -1000,7 +1256,7 @@ impl Db {
     }
 
     pub fn admin_session_insert(&self, s: &AdminSessionRow) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "INSERT INTO admin_sessions (
                 token_hash, stage, created_at, expires_at, last_seen_at, remote, user_agent
@@ -1019,7 +1275,7 @@ impl Db {
     }
 
     pub fn admin_session_get(&self, token_hash: &str) -> Result<Option<AdminSessionRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.query_row(
             "SELECT token_hash, stage, created_at, expires_at, last_seen_at, remote, user_agent
              FROM admin_sessions WHERE token_hash = ?1",
@@ -1041,7 +1297,7 @@ impl Db {
     }
 
     pub fn admin_session_touch(&self, token_hash: &str, last_seen_at: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "UPDATE admin_sessions SET last_seen_at = ?2 WHERE token_hash = ?1",
             params![token_hash, last_seen_at],
@@ -1055,7 +1311,7 @@ impl Db {
         stage: &str,
         expires_at: &str,
     ) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "UPDATE admin_sessions SET stage = ?2, expires_at = ?3, last_seen_at = ?3 WHERE token_hash = ?1",
             params![token_hash, stage, expires_at],
@@ -1064,7 +1320,7 @@ impl Db {
     }
 
     pub fn admin_session_delete(&self, token_hash: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "DELETE FROM admin_sessions WHERE token_hash = ?1",
             params![token_hash],
@@ -1073,7 +1329,7 @@ impl Db {
     }
 
     pub fn admin_sessions_purge_expired(&self, now: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "DELETE FROM admin_sessions WHERE expires_at < ?1",
             params![now],
@@ -1087,14 +1343,14 @@ impl Db {
 
     /// Drop every admin session (password reset / lockout recovery).
     pub fn admin_sessions_clear_all(&self) -> Result<usize> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let n = conn.execute("DELETE FROM admin_sessions", [])?;
         Ok(n)
     }
 
     /// Remove all registered security keys.
     pub fn admin_webauthn_clear_all(&self) -> Result<usize> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let n = conn.execute("DELETE FROM admin_webauthn", [])?;
         let _ = conn.execute("DELETE FROM admin_webauthn_state", [])?;
         Ok(n)
@@ -1102,13 +1358,13 @@ impl Db {
 
     /// Delete the singleton admin account (forces first-run setup).
     pub fn admin_account_delete(&self) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let n = conn.execute("DELETE FROM admin_account WHERE id = 1", [])?;
         Ok(n > 0)
     }
 
     pub fn admin_webauthn_list(&self) -> Result<Vec<AdminWebauthnRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let mut stmt = conn.prepare(
             "SELECT cred_id, passkey_json, label, created_at, last_used_at
              FROM admin_webauthn ORDER BY created_at ASC",
@@ -1128,7 +1384,7 @@ impl Db {
     }
 
     pub fn admin_webauthn_upsert(&self, row: &AdminWebauthnRow) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "INSERT INTO admin_webauthn (cred_id, passkey_json, label, created_at, last_used_at)
              VALUES (?1,?2,?3,?4,?5)
@@ -1148,7 +1404,7 @@ impl Db {
     }
 
     pub fn admin_webauthn_delete(&self, cred_id: &str) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let n = conn.execute(
             "DELETE FROM admin_webauthn WHERE cred_id = ?1",
             params![cred_id],
@@ -1157,7 +1413,7 @@ impl Db {
     }
 
     pub fn admin_webauthn_touch(&self, cred_id: &str, last_used_at: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "UPDATE admin_webauthn SET last_used_at = ?2 WHERE cred_id = ?1",
             params![cred_id, last_used_at],
@@ -1172,7 +1428,7 @@ impl Db {
         state_json: &str,
         expires_at: &str,
     ) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "INSERT INTO admin_webauthn_state (id, kind, state_json, expires_at)
              VALUES (?1,?2,?3,?4)
@@ -1186,7 +1442,7 @@ impl Db {
     }
 
     pub fn admin_state_take(&self, id: &str) -> Result<Option<(String, String)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let row: Option<(String, String, String)> = conn
             .query_row(
                 "SELECT kind, state_json, expires_at FROM admin_webauthn_state WHERE id = ?1",
@@ -1209,7 +1465,7 @@ impl Db {
     }
 
     pub fn admin_state_get(&self, id: &str) -> Result<Option<(String, String)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         let row: Option<(String, String, String)> = conn
             .query_row(
                 "SELECT kind, state_json, expires_at FROM admin_webauthn_state WHERE id = ?1",
@@ -1232,7 +1488,7 @@ impl Db {
     }
 
     pub fn admin_state_delete(&self, id: &str) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.acquire()?;
         conn.execute(
             "DELETE FROM admin_webauthn_state WHERE id = ?1",
             params![id],
@@ -1310,6 +1566,21 @@ pub struct DeviceRow {
     pub banned: bool,
     pub email: String,
     pub company_id: String,
+    #[serde(default)]
+    pub app_version: String,
+    #[serde(default)]
+    pub manufacturer: String,
+    #[serde(default)]
+    pub brand: String,
+    #[serde(default)]
+    pub device_name: String,
+    #[serde(default)]
+    pub details_json: String,
+    #[serde(default)]
+    pub last_seen_at: String,
+    /// When true, skip the company per-device upload quota.
+    #[serde(default)]
+    pub rate_limit_bypass: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1330,6 +1601,20 @@ pub struct CompanyRow {
     /// Label color as `#RRGGBB` (empty = UI/default palette).
     #[serde(default)]
     pub color: String,
+    /// Max active devices per work email (`1` = unique, `0` = unlimited).
+    #[serde(default = "default_max_devices_per_email")]
+    pub max_devices_per_email: u32,
+    /// New upload sessions allowed per device per rolling hour (`0` = unlimited).
+    #[serde(default = "default_device_uploads_per_hour")]
+    pub device_uploads_per_hour: u32,
+}
+
+fn default_max_devices_per_email() -> u32 {
+    1
+}
+
+fn default_device_uploads_per_hour() -> u32 {
+    10
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1357,6 +1642,16 @@ pub struct AccessEventRow {
     pub device_id: String,
     pub kind: String,
     pub resource_id: String,
+    pub is_admin: bool,
+    pub admin_user: String,
+    #[serde(default)]
+    pub app_version: String,
+    #[serde(default)]
+    pub platform: String,
+    #[serde(default)]
+    pub model: String,
+    #[serde(default)]
+    pub os_version: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1479,6 +1774,13 @@ fn row_to_device(r: &rusqlite::Row<'_>) -> rusqlite::Result<DeviceRow> {
         banned: r.get::<_, i64>(9)? != 0,
         email: r.get(10)?,
         company_id: r.get(11)?,
+        app_version: r.get::<_, String>(12).unwrap_or_default(),
+        manufacturer: r.get::<_, String>(13).unwrap_or_default(),
+        brand: r.get::<_, String>(14).unwrap_or_default(),
+        device_name: r.get::<_, String>(15).unwrap_or_default(),
+        details_json: r.get::<_, String>(16).unwrap_or_default(),
+        last_seen_at: r.get::<_, String>(17).unwrap_or_default(),
+        rate_limit_bypass: r.get::<_, i64>(18).unwrap_or(0) != 0,
     })
 }
 
@@ -1493,6 +1795,8 @@ fn row_to_company(r: &rusqlite::Row<'_>) -> rusqlite::Result<CompanyRow> {
         enabled: r.get::<_, i64>(4)? != 0,
         updated_at: r.get(5)?,
         color: r.get(6)?,
+        max_devices_per_email: r.get::<_, i64>(7)?.max(0) as u32,
+        device_uploads_per_hour: r.get::<_, i64>(8).unwrap_or(10).max(0) as u32,
     })
 }
 
@@ -1505,6 +1809,51 @@ fn ensure_companies_color(conn: &Connection) -> Result<()> {
     if !cols.iter().any(|c| c == "color") {
         conn.execute(
             "ALTER TABLE companies ADD COLUMN color TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+/// Soft-migrate existing DBs created before schema v5 (companies.max_devices_per_email).
+fn ensure_companies_max_devices_per_email(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(companies)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if !cols.iter().any(|c| c == "max_devices_per_email") {
+        conn.execute(
+            "ALTER TABLE companies ADD COLUMN max_devices_per_email INTEGER NOT NULL DEFAULT 1",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+/// Soft-migrate: companies.device_uploads_per_hour (per-device report quota).
+fn ensure_companies_device_uploads_per_hour(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(companies)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if !cols.iter().any(|c| c == "device_uploads_per_hour") {
+        conn.execute(
+            "ALTER TABLE companies ADD COLUMN device_uploads_per_hour INTEGER NOT NULL DEFAULT 10",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+/// Soft-migrate: devices.rate_limit_bypass (per-device quota override).
+fn ensure_devices_rate_limit_bypass(conn: &Connection) -> Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(devices)")?;
+    let cols: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    if !cols.iter().any(|c| c == "rate_limit_bypass") {
+        conn.execute(
+            "ALTER TABLE devices ADD COLUMN rate_limit_bypass INTEGER NOT NULL DEFAULT 0",
             [],
         )?;
     }
@@ -1552,7 +1901,73 @@ fn row_to_access(r: &rusqlite::Row<'_>) -> rusqlite::Result<AccessEventRow> {
         device_id: r.get(7)?,
         kind: r.get(8)?,
         resource_id: r.get(9)?,
+        is_admin: r.get::<_, i64>(10).unwrap_or(0) != 0,
+        admin_user: r.get::<_, String>(11).unwrap_or_default(),
+        app_version: r.get::<_, String>(12).unwrap_or_default(),
+        platform: r.get::<_, String>(13).unwrap_or_default(),
+        model: r.get::<_, String>(14).unwrap_or_default(),
+        os_version: r.get::<_, String>(15).unwrap_or_default(),
     })
+}
+
+/// Soft-migrate existing DBs created before schema v6 (access_events admin actor).
+fn ensure_access_events_admin(conn: &Connection) -> Result<()> {
+    let cols: Vec<String> = {
+        let mut stmt = conn.prepare("PRAGMA table_info(access_events)")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(1))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()?
+    };
+    if !cols.iter().any(|c| c == "is_admin") {
+        conn.execute_batch(
+            "ALTER TABLE access_events ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0",
+        )?;
+    }
+    if !cols.iter().any(|c| c == "admin_user") {
+        conn.execute_batch(
+            "ALTER TABLE access_events ADD COLUMN admin_user TEXT NOT NULL DEFAULT ''",
+        )?;
+    }
+    Ok(())
+}
+
+fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(1))?;
+    Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
+/// Soft-migrate schema v7 device client metadata columns.
+fn ensure_devices_client_meta(conn: &Connection) -> Result<()> {
+    let cols = table_columns(conn, "devices")?;
+    for (name, ddl) in [
+        ("app_version", "ALTER TABLE devices ADD COLUMN app_version TEXT NOT NULL DEFAULT ''"),
+        ("manufacturer", "ALTER TABLE devices ADD COLUMN manufacturer TEXT NOT NULL DEFAULT ''"),
+        ("brand", "ALTER TABLE devices ADD COLUMN brand TEXT NOT NULL DEFAULT ''"),
+        ("device_name", "ALTER TABLE devices ADD COLUMN device_name TEXT NOT NULL DEFAULT ''"),
+        ("details_json", "ALTER TABLE devices ADD COLUMN details_json TEXT NOT NULL DEFAULT ''"),
+        ("last_seen_at", "ALTER TABLE devices ADD COLUMN last_seen_at TEXT NOT NULL DEFAULT ''"),
+    ] {
+        if !cols.iter().any(|c| c == name) {
+            conn.execute_batch(ddl)?;
+        }
+    }
+    Ok(())
+}
+
+/// Soft-migrate schema v7 access_events client metadata columns.
+fn ensure_access_events_client_meta(conn: &Connection) -> Result<()> {
+    let cols = table_columns(conn, "access_events")?;
+    for (name, ddl) in [
+        ("app_version", "ALTER TABLE access_events ADD COLUMN app_version TEXT NOT NULL DEFAULT ''"),
+        ("platform", "ALTER TABLE access_events ADD COLUMN platform TEXT NOT NULL DEFAULT ''"),
+        ("model", "ALTER TABLE access_events ADD COLUMN model TEXT NOT NULL DEFAULT ''"),
+        ("os_version", "ALTER TABLE access_events ADD COLUMN os_version TEXT NOT NULL DEFAULT ''"),
+    ] {
+        if !cols.iter().any(|c| c == name) {
+            conn.execute_batch(ddl)?;
+        }
+    }
+    Ok(())
 }
 
 fn row_to_challenge(r: &rusqlite::Row<'_>) -> rusqlite::Result<ChallengeRow> {

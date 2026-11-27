@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
-import 'theme_picker_button.dart';
+import 'server_health_indicator.dart';
+import 'settings_button.dart';
 
 class GuideScaffold extends StatelessWidget {
   const GuideScaffold({
@@ -29,7 +30,10 @@ class GuideScaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: Text(title), actions: const [ThemePickerButton()]),
+      appBar: AppBar(
+        title: Text(title),
+        actions: const [ServerHealthIndicator(), SettingsButton()],
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),

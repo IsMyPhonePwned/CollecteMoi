@@ -23,6 +23,58 @@ pub struct EnrollRequest {
     pub platform: String,
     pub model: String,
     pub os_version: String,
+    #[serde(default)]
+    pub app_version: String,
+    #[serde(default)]
+    pub manufacturer: String,
+    #[serde(default)]
+    pub brand: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub details: serde_json::Value,
+}
+
+/// Client device + app identity carried at enroll and on subsequent packets.
+#[derive(Debug, Clone, Default)]
+pub struct DeviceClientMeta {
+    pub platform: String,
+    pub model: String,
+    pub os_version: String,
+    pub app_version: String,
+    pub manufacturer: String,
+    pub brand: String,
+    pub name: String,
+    pub details_json: String,
+}
+
+impl DeviceClientMeta {
+    pub fn from_enroll_fields(
+        platform: String,
+        model: String,
+        os_version: String,
+        app_version: String,
+        manufacturer: String,
+        brand: String,
+        name: String,
+        details: serde_json::Value,
+    ) -> Self {
+        let details_json = match details {
+            serde_json::Value::Null => String::new(),
+            serde_json::Value::Object(map) if map.is_empty() => String::new(),
+            other => other.to_string(),
+        };
+        Self {
+            platform,
+            model,
+            os_version,
+            app_version,
+            manufacturer,
+            brand,
+            name,
+            details_json,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,7 +83,12 @@ pub struct EnrollResponse {
     pub case_id: Uuid,
     pub case_public_key: String,
     pub server_base_url: String,
+    /// Lab / product title for the enrolled company (from company branding).
     pub display_name: String,
+    #[serde(default)]
+    pub company_id: String,
+    #[serde(default)]
+    pub company_name: String,
     pub enabled_collectors: Vec<String>,
     /// SHA-256 of the exchanged noise key (server ack; never echoes the secret).
     pub noise_key_fingerprint: String,
@@ -79,6 +136,21 @@ pub struct DeviceRecord {
     pub email: String,
     #[serde(default)]
     pub company_id: String,
+    #[serde(default)]
+    pub app_version: String,
+    #[serde(default)]
+    pub manufacturer: String,
+    #[serde(default)]
+    pub brand: String,
+    #[serde(default)]
+    pub device_name: String,
+    #[serde(default)]
+    pub details_json: String,
+    #[serde(default)]
+    pub last_seen_at: String,
+    /// When true, this device ignores the company upload-per-hour quota.
+    #[serde(default)]
+    pub rate_limit_bypass: bool,
 }
 
 /// Lab admin device view — includes full keys (console is local/dev, no auth).
@@ -99,6 +171,13 @@ pub struct DevicePublicView {
     pub public_key_banned: bool,
     pub email: String,
     pub company_id: String,
+    pub app_version: String,
+    pub manufacturer: String,
+    pub brand: String,
+    pub device_name: String,
+    pub details_json: String,
+    pub last_seen_at: String,
+    pub rate_limit_bypass: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,6 +218,8 @@ pub struct EnrollmentOptions {
     pub public_url: String,
     pub case_pk: Option<PathBuf>,
     pub case_sk: Option<PathBuf>,
+    /// Seed well-known enrollment tokens only for loopback development servers.
+    pub seed_demo_tokens: bool,
 }
 
 impl EnrollmentStore {
@@ -146,14 +227,16 @@ impl EnrollmentStore {
         let mut tokens = HashMap::new();
         let mut reusable = HashSet::new();
         let demo_case = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
-        tokens.insert("demo".into(), demo_case);
-        tokens.insert("DEVTOKEN1".into(), demo_case);
-        reusable.insert("demo".into());
-        reusable.insert("DEVTOKEN1".into());
         let seeded_at = now_secs_str();
         let mut token_created_at = HashMap::new();
-        token_created_at.insert("demo".into(), seeded_at.clone());
-        token_created_at.insert("DEVTOKEN1".into(), seeded_at);
+        if opts.seed_demo_tokens {
+            tokens.insert("demo".into(), demo_case);
+            tokens.insert("DEVTOKEN1".into(), demo_case);
+            reusable.insert("demo".into());
+            reusable.insert("DEVTOKEN1".into());
+            token_created_at.insert("demo".into(), seeded_at.clone());
+            token_created_at.insert("DEVTOKEN1".into(), seeded_at);
+        }
 
         let keys_dir = data_dir.join("keys");
         let devices_dir = data_dir.join("devices");
@@ -224,13 +307,111 @@ impl EnrollmentStore {
 
     pub fn is_public_key_banned(&self, public_key: &str) -> bool {
         let key = normalize_pk(public_key);
-        self.banned_public_keys.lock().unwrap().contains_key(&key)
-            || self
-                .devices
-                .lock()
-                .unwrap()
-                .values()
-                .any(|d| normalize_pk(&d.public_key) == key && d.banned)
+        if key.is_empty() {
+            return false;
+        }
+        if self.banned_public_keys.lock().unwrap().contains_key(&key) {
+            return true;
+        }
+        if self
+            .devices
+            .lock()
+            .unwrap()
+            .values()
+            .any(|d| normalize_pk(&d.public_key) == key && d.banned)
+        {
+            return true;
+        }
+        // SQLite is authoritative if the in-memory maps ever drift.
+        if self.db.banned_contains(&key).unwrap_or(false) {
+            return true;
+        }
+        matches!(
+            self.db.device_find_by_pubkey(&key).ok().flatten(),
+            Some(d) if d.banned
+        )
+    }
+
+    /// True when the enrolled device id is marked banned (memory, then SQLite).
+    pub fn is_device_id_banned(&self, device_id: &str) -> bool {
+        let Ok(id) = Uuid::parse_str(device_id.trim()) else {
+            return false;
+        };
+        if self
+            .devices
+            .lock()
+            .unwrap()
+            .get(&id)
+            .map(|d| d.banned)
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        matches!(self.db.device_get(&id.to_string()).ok().flatten(), Some(d) if d.banned)
+    }
+
+    /// Refresh last_seen + client hardware/version from request headers.
+    /// Optional `detail_updates` (security_patch, api_level, …) are merged into
+    /// `details_json` only when values change, so chunk uploads stay cheap.
+    pub fn touch_device(
+        &self,
+        device_id: &str,
+        app_version: &str,
+        platform: &str,
+        model: &str,
+        os_version: &str,
+        manufacturer: &str,
+        brand: &str,
+        device_name: &str,
+        detail_updates: &[(&str, &str)],
+    ) {
+        let Ok(id) = Uuid::parse_str(device_id) else {
+            return;
+        };
+        let now = now_secs_str();
+        let mut details_json_out: Option<String> = None;
+        if let Some(d) = self.devices.lock().unwrap().get_mut(&id) {
+            if !app_version.is_empty() {
+                d.app_version = app_version.to_string();
+            }
+            if !platform.is_empty() {
+                d.platform = platform.to_string();
+            }
+            if !model.is_empty() {
+                d.model = model.to_string();
+            }
+            if !os_version.is_empty() {
+                d.os_version = os_version.to_string();
+            }
+            if !manufacturer.is_empty() {
+                d.manufacturer = manufacturer.to_string();
+            }
+            if !brand.is_empty() {
+                d.brand = brand.to_string();
+            }
+            if !device_name.is_empty() {
+                d.device_name = device_name.to_string();
+            }
+            if let Some(merged) = merge_device_details_json(&d.details_json, detail_updates) {
+                d.details_json = merged.clone();
+                details_json_out = Some(merged);
+            }
+            d.last_seen_at = now.clone();
+        }
+        let _ = self.db.device_touch(
+            device_id,
+            app_version,
+            platform,
+            model,
+            os_version,
+            manufacturer,
+            brand,
+            device_name,
+            &now,
+        );
+        if let Some(details) = details_json_out {
+            let _ = self.db.device_set_details_json(device_id, &details);
+        }
     }
 
     pub fn list_devices(&self) -> Vec<DevicePublicView> {
@@ -255,6 +436,13 @@ impl EnrollmentStore {
                 public_key_banned: banned.contains_key(&normalize_pk(&d.public_key)),
                 email: d.email.clone(),
                 company_id: d.company_id.clone(),
+                app_version: d.app_version.clone(),
+                manufacturer: d.manufacturer.clone(),
+                brand: d.brand.clone(),
+                device_name: d.device_name.clone(),
+                details_json: d.details_json.clone(),
+                last_seen_at: d.last_seen_at.clone(),
+                rate_limit_bypass: d.rate_limit_bypass,
             })
             .collect();
         list.sort_by(|a, b| a.enrolled_at.cmp(&b.enrolled_at));
@@ -276,9 +464,16 @@ impl EnrollmentStore {
                     "platform": d.platform,
                     "model": d.model,
                     "os_version": d.os_version,
+                    "app_version": d.app_version,
+                    "manufacturer": d.manufacturer,
+                    "brand": d.brand,
+                    "device_name": d.device_name,
+                    "details_json": d.details_json,
+                    "last_seen_at": d.last_seen_at,
                     "email": d.email,
                     "company_id": d.company_id,
                     "enrolled_at": d.enrolled_at,
+                    "rate_limit_bypass": d.rate_limit_bypass,
                 })
             })
             .collect()
@@ -376,6 +571,36 @@ impl EnrollmentStore {
             .ok_or_else(|| "device not found".into())
     }
 
+    pub fn set_device_rate_limit_bypass(
+        &self,
+        device_id: Uuid,
+        bypass: bool,
+    ) -> Result<DevicePublicView, String> {
+        {
+            let mut devices = self.devices.lock().unwrap();
+            let d = devices
+                .get_mut(&device_id)
+                .ok_or_else(|| "device not found".to_string())?;
+            d.rate_limit_bypass = bypass;
+            persist_device(&self.db, &self.devices_dir, d).map_err(|e| e.to_string())?;
+        }
+        let _ = self
+            .db
+            .device_set_rate_limit_bypass(&device_id.to_string(), bypass);
+        self.list_devices()
+            .into_iter()
+            .find(|v| v.device_id == device_id)
+            .ok_or_else(|| "device not found".into())
+    }
+
+    /// Company id + whether this device bypasses the company upload quota.
+    pub fn device_rate_limit_context(&self, device_id: &str) -> Option<(String, bool)> {
+        let id = Uuid::parse_str(device_id).ok()?;
+        let devices = self.devices.lock().unwrap();
+        let d = devices.get(&id)?;
+        Some((d.company_id.clone(), d.rate_limit_bypass))
+    }
+
     pub fn noise_key_for_pubkey(&self, public_key: &str) -> Option<Vec<u8>> {
         let want = normalize_pk(public_key);
         self.devices.lock().unwrap().values().find_map(|d| {
@@ -439,6 +664,55 @@ impl EnrollmentStore {
             .cloned()
     }
 
+    /// Active (non-banned) devices already enrolled under this work email.
+    pub fn active_device_count_for_email(&self, email: &str) -> usize {
+        let email = email.trim();
+        if email.is_empty() {
+            return 0;
+        }
+        self.devices
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|d| !d.banned && d.email.eq_ignore_ascii_case(email))
+            .count()
+    }
+
+    /// Enforce per-email device caps. `max == 0` means unlimited.
+    /// Re-enrolling the same device public key for the same email is always allowed.
+    pub fn assert_email_device_slot(
+        &self,
+        email: &str,
+        max_devices_per_email: u32,
+        device_public_key: Option<&str>,
+    ) -> Result<(), String> {
+        let email = email.trim();
+        if email.is_empty() || max_devices_per_email == 0 {
+            return Ok(());
+        }
+        if let Some(pk) = device_public_key {
+            let want = normalize_pk(pk);
+            if !want.is_empty() {
+                if let Some(existing) = self.find_device_by_pubkey(&want) {
+                    if !existing.banned && existing.email.eq_ignore_ascii_case(email) {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+        let count = self.active_device_count_for_email(email);
+        if count >= max_devices_per_email as usize {
+            return Err(if max_devices_per_email == 1 {
+                "this email is already enrolled on another device".into()
+            } else {
+                format!(
+                    "this email already has the maximum of {max_devices_per_email} enrolled devices"
+                )
+            });
+        }
+        Ok(())
+    }
+
     pub fn enroll(&self, req: EnrollRequest) -> Result<EnrollResponse, String> {
         let mut tokens = self.tokens.lock().unwrap();
         let case_id = tokens
@@ -450,13 +724,21 @@ impl EnrollmentStore {
         }
         drop(tokens);
 
+        let meta = DeviceClientMeta::from_enroll_fields(
+            req.platform,
+            req.model,
+            req.os_version,
+            req.app_version,
+            req.manufacturer,
+            req.brand,
+            req.name,
+            req.details,
+        );
         self.enroll_verified(
             case_id,
             req.device_public_key,
             req.noise_key,
-            req.platform,
-            req.model,
-            req.os_version,
+            meta,
             String::new(),
             String::new(),
         )
@@ -468,11 +750,30 @@ impl EnrollmentStore {
         case_id: Uuid,
         device_public_key: String,
         noise_key: String,
-        platform: String,
-        model: String,
-        os_version: String,
+        meta: DeviceClientMeta,
         email: String,
         company_id: String,
+    ) -> Result<EnrollResponse, String> {
+        self.enroll_verified_limited(
+            case_id,
+            device_public_key,
+            noise_key,
+            meta,
+            email,
+            company_id,
+            0, // caller supplies the company limit via the OTP confirm path
+        )
+    }
+
+    pub fn enroll_verified_limited(
+        &self,
+        case_id: Uuid,
+        device_public_key: String,
+        noise_key: String,
+        meta: DeviceClientMeta,
+        email: String,
+        company_id: String,
+        max_devices_per_email: u32,
     ) -> Result<EnrollResponse, String> {
         let pk = normalize_pk(&device_public_key);
         if pk.is_empty() {
@@ -483,24 +784,81 @@ impl EnrollmentStore {
             return Err("device public key is banned".into());
         }
 
+        self.assert_email_device_slot(&email, max_devices_per_email, Some(&pk))?;
+
         let noise_bytes = validate_noise_key_hex(&noise_key)?;
         let noise_fp = fingerprint_key(&noise_bytes);
         let noise_hex = hex::encode(&noise_bytes);
 
+        // Re-enroll: refresh the existing device row for the same pubkey + email.
+        if let Some(existing) = self.find_device_by_pubkey(&pk) {
+            if !existing.banned && existing.email.eq_ignore_ascii_case(email.trim()) {
+                let mut record = existing;
+                record.case_id = case_id;
+                record.noise_key = noise_hex;
+                record.noise_key_fingerprint = noise_fp.clone();
+                record.platform = meta.platform;
+                record.model = meta.model;
+                record.os_version = meta.os_version;
+                record.app_version = meta.app_version;
+                record.manufacturer = meta.manufacturer;
+                record.brand = meta.brand;
+                record.device_name = meta.name;
+                record.details_json = meta.details_json;
+                record.last_seen_at = now_secs_str();
+                record.company_id = company_id.clone();
+                record.email = email;
+                record.banned = false;
+                let device_id = record.device_id;
+                self.devices
+                    .lock()
+                    .unwrap()
+                    .insert(device_id, record.clone());
+                let _ = persist_device(&self.db, &self.devices_dir, &record);
+                let path = self.keys_dir.join(format!("device-{device_id}.pk.hex"));
+                let _ = fs::write(path, &pk);
+                let noise_path = self.keys_dir.join(format!("device-{device_id}.noise.hex"));
+                let _ = fs::write(noise_path, &record.noise_key);
+                return Ok(EnrollResponse {
+                    device_id,
+                    case_id,
+                    case_public_key: self.case_public_key.clone(),
+                    server_base_url: self.server_base_url.lock().unwrap().clone(),
+                    display_name: self.display_name.lock().unwrap().clone(),
+                    company_id,
+                    company_name: String::new(),
+                    enabled_collectors: vec![
+                        "android_bugreport".into(),
+                        "ios_sysdiagnose".into(),
+                        "message_report".into(),
+                    ],
+                    noise_key_fingerprint: noise_fp,
+                });
+            }
+        }
+
         let device_id = Uuid::new_v4();
+        let enrolled_at = now_secs_str();
         let record = DeviceRecord {
             device_id,
             case_id,
             public_key: pk.clone(),
             noise_key: noise_hex,
             noise_key_fingerprint: noise_fp.clone(),
-            platform,
-            model,
-            os_version,
-            enrolled_at: now_secs_str(),
+            platform: meta.platform,
+            model: meta.model,
+            os_version: meta.os_version,
+            enrolled_at: enrolled_at.clone(),
             banned: false,
             email,
-            company_id,
+            company_id: company_id.clone(),
+            app_version: meta.app_version,
+            manufacturer: meta.manufacturer,
+            brand: meta.brand,
+            device_name: meta.name,
+            details_json: meta.details_json,
+            last_seen_at: enrolled_at,
+            rate_limit_bypass: false,
         };
         self.devices
             .lock()
@@ -519,6 +877,8 @@ impl EnrollmentStore {
             case_public_key: self.case_public_key.clone(),
             server_base_url: self.server_base_url.lock().unwrap().clone(),
             display_name: self.display_name.lock().unwrap().clone(),
+            company_id,
+            company_name: String::new(),
             enabled_collectors: vec![
                 "android_bugreport".into(),
                 "ios_sysdiagnose".into(),
@@ -561,6 +921,41 @@ impl EnrollmentStore {
 
 fn normalize_pk(pk: &str) -> String {
     pk.trim().to_lowercase()
+}
+
+/// Merge header-provided device detail keys into `details_json`.
+/// Returns `Some(new_json)` only when at least one value changed.
+fn merge_device_details_json(existing: &str, updates: &[(&str, &str)]) -> Option<String> {
+    if updates.iter().all(|(_, v)| v.trim().is_empty()) {
+        return None;
+    }
+    let mut map: serde_json::Map<String, serde_json::Value> = if existing.trim().is_empty() {
+        serde_json::Map::new()
+    } else {
+        match serde_json::from_str::<serde_json::Value>(existing) {
+            Ok(serde_json::Value::Object(m)) => m,
+            _ => serde_json::Map::new(),
+        }
+    };
+    let mut changed = false;
+    for (key, value) in updates {
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        let prev = map.get(*key).and_then(|v| v.as_str()).unwrap_or("");
+        if prev != value {
+            map.insert(
+                (*key).to_string(),
+                serde_json::Value::String(value.to_string()),
+            );
+            changed = true;
+        }
+    }
+    if !changed {
+        return None;
+    }
+    Some(serde_json::Value::Object(map).to_string())
 }
 
 fn now_secs_str() -> String {
@@ -609,6 +1004,13 @@ fn persist_device(db: &Db, dir: &Path, record: &DeviceRecord) -> anyhow::Result<
         banned: record.banned,
         email: record.email.clone(),
         company_id: record.company_id.clone(),
+        app_version: record.app_version.clone(),
+        manufacturer: record.manufacturer.clone(),
+        brand: record.brand.clone(),
+        device_name: record.device_name.clone(),
+        details_json: record.details_json.clone(),
+        last_seen_at: record.last_seen_at.clone(),
+        rate_limit_bypass: record.rate_limit_bypass,
     })?;
     fs::create_dir_all(dir)?;
     let path = dir.join(format!("{}.json", record.device_id));
@@ -642,6 +1044,13 @@ fn load_devices_from_db(db: &Db) -> anyhow::Result<Option<HashMap<Uuid, DeviceRe
                 banned: r.banned,
                 email: r.email,
                 company_id: r.company_id,
+                app_version: r.app_version,
+                manufacturer: r.manufacturer,
+                brand: r.brand,
+                device_name: r.device_name,
+                details_json: r.details_json,
+                last_seen_at: r.last_seen_at,
+                rate_limit_bypass: r.rate_limit_bypass,
             },
         );
     }
@@ -736,9 +1145,46 @@ pub async fn enroll(
     State(state): State<AppState>,
     Json(req): Json<EnrollRequest>,
 ) -> Result<(StatusCode, Json<EnrollResponse>), (StatusCode, Json<serde_json::Value>)> {
+    let token_hint = {
+        let t = req.token.trim();
+        if t.len() <= 4 {
+            "••••".to_string()
+        } else {
+            format!("{}…{}", &t[..2], &t[t.len().saturating_sub(2)..])
+        }
+    };
     match state.enrollment.enroll(req) {
-        Ok(res) => Ok((StatusCode::CREATED, Json(res))),
+        Ok(res) => {
+            state.otp.audit(
+                "enroll_ok",
+                None,
+                None,
+                None,
+                Some(&res.device_id.to_string()),
+                None,
+                Some(&format!("enrolled_via_token token={token_hint}")),
+            );
+            Ok((StatusCode::CREATED, Json(res)))
+        }
         Err(e) => {
+            let reason = if e.contains("banned") {
+                "banned_public_key"
+            } else if e.contains("token") {
+                "invalid_token"
+            } else if e.contains("maximum") || e.contains("already enrolled") {
+                "device_slot_full"
+            } else {
+                "enroll_rejected"
+            };
+            state.otp.audit(
+                "enroll_token_fail",
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(&format!("{reason}: {e} token={token_hint}")),
+            );
             let status = if e.contains("banned") {
                 StatusCode::FORBIDDEN
             } else {
@@ -760,7 +1206,7 @@ pub async fn requests(State(state): State<AppState>) -> Json<Vec<CollectionReque
 pub async fn post_message(
     Json(body): Json<serde_json::Value>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    tracing::info!(?body, "message report received (stub)");
+    tracing::info!(fields = body.as_object().map_or(0, serde_json::Map::len), "message report received (stub)");
     (
         StatusCode::ACCEPTED,
         Json(serde_json::json!({ "status": "accepted" })),

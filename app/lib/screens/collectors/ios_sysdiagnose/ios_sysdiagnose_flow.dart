@@ -101,9 +101,14 @@ class _IosSysdiagnoseFlowState extends State<IosSysdiagnoseFlow> {
 
   @override
   Widget build(BuildContext context) {
-    final guide = context.watch<TenantConfig>().copy.iosSysdiagnose;
+    context.watch<TenantConfig>();
+    final guide = GuideCopy(
+      title: context.branded((c) => c.iosSysdiagnose.title),
+      headline: context.branded((c) => c.iosSysdiagnose.headline),
+      body: context.branded((c) => c.iosSysdiagnose.body),
+    );
     return GuideScaffold(
-      title: context.tr(guide.title),
+      title: guide.title,
       step: _step,
       totalSteps: total,
       primaryLabel: _step == 6
@@ -114,8 +119,8 @@ class _IosSysdiagnoseFlowState extends State<IosSysdiagnoseFlow> {
       onSecondary: _importFallback,
       child: switch (_step) {
         1 => GuideBody(
-            headline: context.tr(guide.headline),
-            body: context.tr(guide.body),
+            headline: guide.headline,
+            body: guide.body,
           ),
         2 => GuideBody(
             headline: context.tr('Trigger sysdiagnose'),

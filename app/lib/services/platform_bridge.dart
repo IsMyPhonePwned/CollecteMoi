@@ -62,4 +62,67 @@ class PlatformBridge {
       return null;
     }
   }
+
+  /// Android: start a dataSync foreground service so uploads keep running
+  /// when the user leaves the app.
+  Future<void> startUploadForeground({
+    required String title,
+    required String text,
+  }) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      await _channel.invokeMethod('startUploadForeground', {
+        'title': title,
+        'text': text,
+      });
+    } on MissingPluginException {
+      // no-op
+    }
+  }
+
+  Future<void> updateUploadForeground({
+    required String title,
+    required String text,
+  }) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      await _channel.invokeMethod('updateUploadForeground', {
+        'title': title,
+        'text': text,
+      });
+    } on MissingPluginException {
+      // no-op
+    }
+  }
+
+  Future<void> stopUploadForeground() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      await _channel.invokeMethod('stopUploadForeground');
+    } on MissingPluginException {
+      // no-op
+    }
+  }
+
+  /// System notification when an upload finishes (Android + iOS).
+  Future<void> notifyUploadFinished({
+    required String title,
+    required String text,
+    required bool success,
+  }) async {
+    if (kIsWeb) return;
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.iOS) {
+      return;
+    }
+    try {
+      await _channel.invokeMethod('notifyUploadFinished', {
+        'title': title,
+        'text': text,
+        'success': success,
+      });
+    } on MissingPluginException {
+      // no-op
+    }
+  }
 }

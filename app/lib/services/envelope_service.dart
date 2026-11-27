@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../crypto/envelope_bridge.dart';
 import '../models/models.dart';
+import 'api_client.dart';
 
 /// Seals artefacts as CollecteMoi `CM01` envelopes.
 ///
@@ -17,6 +18,13 @@ class EnvelopeService {
 
   /// API base URL for `/v1/lab/seal` fallback (web / missing dylib).
   String? labSealBaseUrl;
+
+  /// Mirrored from [ApiClient] so lab-seal packets carry the same device headers.
+  ClientIdentity clientIdentity = const ClientIdentity();
+
+  void applyClientIdentity(ClientIdentity identity) {
+    clientIdentity = identity;
+  }
 
   Future<SealedArtefact> sealBytes({
     required Uint8List plaintext,
@@ -80,9 +88,24 @@ class EnvelopeService {
         'or run the API with --lab-seal true for web.',
       );
     }
+    final id = clientIdentity;
+    final uaPlatform = id.platform.isEmpty ? 'unknown' : id.platform;
+    final uaModel = id.model.isEmpty ? uaPlatform : id.model;
+    final uaVersion = id.appVersion.isEmpty ? 'dev' : id.appVersion;
     final res = await http.post(
       Uri.parse('$base/v1/lab/seal'),
-      headers: {'content-type': 'application/json'},
+      headers: {
+        'content-type': 'application/json',
+        'user-agent': 'CollecteMoi/$uaVersion ($uaPlatform; $uaModel)',
+        if ((id.deviceId ?? '').isNotEmpty) 'x-device-id': id.deviceId!,
+        if (id.appVersion.isNotEmpty) 'x-app-version': id.appVersion,
+        if (id.platform.isNotEmpty) 'x-device-platform': id.platform,
+        if (id.model.isNotEmpty) 'x-device-model': id.model,
+        if (id.osVersion.isNotEmpty) 'x-device-os': id.osVersion,
+        if (id.manufacturer.isNotEmpty) 'x-device-manufacturer': id.manufacturer,
+        if (id.brand.isNotEmpty) 'x-device-brand': id.brand,
+        if (id.name.isNotEmpty) 'x-device-name': id.name,
+      },
       body: jsonEncode({
         'plaintext_b64': base64Encode(plaintext),
         'artefact': artefact.apiValue,

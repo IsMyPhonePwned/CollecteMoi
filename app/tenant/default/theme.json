@@ -1,6 +1,21 @@
 {
-  "seed_color": "#0F6B52",
+  "seed_color": "#0B126F",
   "brightness_default": "light",
   "light": {},
-  "dark": {}
+  "dark": {},
+  "launcher_icon": {
+    "enabled": true,
+    "source": "logo",
+    "text": "CERT",
+    "font": "system",
+    "size": 15,
+    "x": 69,
+    "y": 86,
+    "scale": 87,
+    "rotation": 0,
+    "color": "#F00000",
+    "badge": true,
+    "badge_color": "#000000",
+    "badge_opacity": 0
+  }
 }

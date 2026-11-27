@@ -17,6 +17,9 @@ use crate::store::UploadMeta;
 
 type ApiError = (StatusCode, Json<ErrorBody>);
 
+/// Canonical client-facing code for a banned device (app matches on this string).
+const DEVICE_BANNED: &str = "device_banned";
+
 fn err(status: StatusCode, msg: impl Into<String>) -> ApiError {
     (status, Json(ErrorBody { error: msg.into() }))
 }
@@ -29,10 +32,67 @@ fn to_env_kind(k: ArtefactKind) -> EnvKind {
     }
 }
 
+fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers.get(name).and_then(|v| v.to_str().ok())
+}
+
+/// Reject create / chunk / complete when the device or its public key is banned.
+/// Checks `x-device-id` and optional body/session public key before any disk work.
+fn reject_if_banned(
+    state: &AppState,
+    headers: &HeaderMap,
+    device_public_key: Option<&str>,
+) -> Result<(), ApiError> {
+    if let Some(device_id) = header_str(headers, "x-device-id") {
+        if state.enrollment.is_device_id_banned(device_id) {
+            return Err(err(StatusCode::FORBIDDEN, DEVICE_BANNED));
+        }
+    }
+    if let Some(pk) = device_public_key {
+        if state.enrollment.is_public_key_banned(pk) {
+            return Err(err(StatusCode::FORBIDDEN, DEVICE_BANNED));
+        }
+    }
+    Ok(())
+}
+
 pub async fn create_upload(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<CreateUploadRequest>,
 ) -> Result<(StatusCode, Json<CreateUploadResponse>), ApiError> {
+    reject_if_banned(&state, &headers, None)?;
+
+    // Per-company report quota (per device), with optional per-device bypass.
+    // Independent of per-IP chunk PUT budgets. Enforced only on the server.
+    if let Some(device_id) = header_str(&headers, "x-device-id") {
+        let (company_id, bypass) = state
+            .enrollment
+            .device_rate_limit_context(device_id)
+            .unwrap_or_default();
+        if !bypass {
+            let limit = if company_id.is_empty() {
+                state.rate_limiter.config().device_uploads_per_hour
+            } else {
+                state
+                    .otp
+                    .get_company(&company_id)
+                    .map(|c| c.device_uploads_per_hour)
+                    .unwrap_or_else(|| state.rate_limiter.config().device_uploads_per_hour)
+            };
+            if let Err(retry) = state.rate_limiter.check_device_upload(device_id, limit) {
+                tracing::warn!(
+                    device_id = %device_id,
+                    company_id = %company_id,
+                    limit,
+                    retry_after = retry.as_secs().max(1),
+                    "device upload rate limit exceeded"
+                );
+                return Err(err(StatusCode::TOO_MANY_REQUESTS, "device_rate_limited"));
+            }
+        }
+    }
+
     if req.chunk_size == 0 || req.chunk_count == 0 {
         return Err(err(
             StatusCode::BAD_REQUEST,
@@ -99,14 +159,18 @@ pub async fn put_chunk(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<StatusCode, ApiError> {
+    reject_if_banned(&state, &headers, None)?;
+
     let digest = headers
         .get("digest")
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
-    state
-        .store
-        .put_chunk(id, n, &body, digest.as_deref())
+    // Disk + SQLite work must not block the async runtime under many parallel uploads.
+    let store = state.store.clone();
+    tokio::task::spawn_blocking(move || store.put_chunk(id, n, &body, digest.as_deref()))
+        .await
+        .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .map_err(|e| {
             let msg = e.to_string();
             if msg.contains("not found") {
@@ -126,8 +190,13 @@ pub async fn put_chunk(
 pub async fn complete_upload(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
+    headers: HeaderMap,
     Json(req): Json<CompleteUploadRequest>,
 ) -> Result<Json<CompleteUploadResponse>, ApiError> {
+    // Ban check *before* assemble — otherwise a banned phone can still mark the
+    // upload complete on disk and leave a ciphertext envelope behind.
+    reject_if_banned(&state, &headers, Some(req.device_public_key.as_str()))?;
+
     let (meta, path) = state.store.assemble(id).map_err(|e| {
         let msg = e.to_string();
         if msg.contains("missing") {
@@ -141,12 +210,8 @@ pub async fn complete_upload(
         }
     })?;
 
-    if state
-        .enrollment
-        .is_public_key_banned(&req.device_public_key)
-    {
-        return Err(err(StatusCode::FORBIDDEN, "device public key is banned"));
-    }
+    // Re-check after assemble in case an admin banned mid-request.
+    reject_if_banned(&state, &headers, Some(req.device_public_key.as_str()))?;
 
     let mut blob =
         std::fs::read(&path).map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;

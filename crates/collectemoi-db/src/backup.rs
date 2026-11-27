@@ -66,7 +66,7 @@ impl Db {
     /// Checkpoint WAL and write a consistent DB copy into `dest`.
     pub fn backup_to_file(&self, dest: &Path) -> Result<()> {
         {
-            let conn = self.conn.lock().unwrap();
+            let conn = self.acquire()?;
             conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
         }
         if let Some(parent) = dest.parent() {
@@ -90,7 +90,7 @@ impl Db {
     pub fn restore_from_file(&self, src_db: &Path) -> Result<()> {
         let src = Connection::open(src_db)
             .with_context(|| format!("open import db {}", src_db.display()))?;
-        let mut dst = self.conn.lock().unwrap();
+        let mut dst = self.acquire()?;
         {
             let backup = Backup::new(&src, &mut dst).context("sqlite restore init")?;
             backup

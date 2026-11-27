@@ -821,12 +821,21 @@
     const $ = (id) => document.getElementById(id);
     const themeSelect = $("theme-select");
     const storedTheme = localStorage.getItem("collectemoi-client-theme");
-    const initialTheme = storedTheme === "dark" ? "dark" : "light";
+    const systemTheme = window.matchMedia?.("(prefers-color-scheme: dark)");
+    const initialTheme = storedTheme === "dark" || storedTheme === "light"
+      ? storedTheme
+      : systemTheme?.matches ? "dark" : "light";
     document.body.dataset.theme = initialTheme;
     themeSelect.value = initialTheme;
     themeSelect.addEventListener("change", () => {
       document.body.dataset.theme = themeSelect.value;
       localStorage.setItem("collectemoi-client-theme", themeSelect.value);
+    });
+    systemTheme?.addEventListener?.("change", (event) => {
+      const savedTheme = localStorage.getItem("collectemoi-client-theme");
+      if (savedTheme === "dark" || savedTheme === "light") return;
+      document.body.dataset.theme = event.matches ? "dark" : "light";
+      themeSelect.value = document.body.dataset.theme;
     });
     const state = {
       session: null,
@@ -987,7 +996,6 @@
 
       const keysEl = $("session-keys");
       keysEl.innerHTML =
-        kvRow("Noise key", s.noiseKeyHex) +
         kvRow("Noise fingerprint", s.noiseKeyFingerprint) +
         kvRow("Device public key", s.devicePublicKeyHex) +
         kvRow("Case public key", s.casePublicKeyHex) +

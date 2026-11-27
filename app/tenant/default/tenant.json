@@ -1,11 +1,11 @@
 {
-  "id": "default",
-  "display_name": "CollectMoi",
-  "tagline": "pouet",
-  "enroll_lead": "poeut opouet",
-  "server_base_url": "https://127.0.0.1:8080",
-  "support_contact": "",
-  "privacy_policy_url": "",
+  "id": "edf",
+  "display_name": "EDF",
+  "tagline": "Secure artefact collection",
+  "enroll_lead": "Enter your work email to receive a one-time verification code.",
+  "server_base_url": "https://collectemoi.42.bzh:8080",
+  "support_contact": "support@collectemoi.example",
+  "privacy_policy_url": "https://collectemoi.example/privacy",
   "default_locale": "en",
   "mode": "generic",
   "enabled_collectors": [
@@ -14,5 +14,48 @@
     "message_report"
   ],
   "tls_pins_spki_sha256": [],
-  "case_encryption_public_key_hex": ""
+  "case_encryption_public_key_hex": "",
+  "copy": {
+    "home": {
+      "headline": "What do you need to send?",
+      "body": "Your analyst asked for evidence from this phone. Follow the guided steps \u2014 we never collect anything without your consent.",
+      "android_title": "Android bugreport",
+      "android_subtitle": "System diagnostic ZIP via Developer options",
+      "ios_title": "iOS sysdiagnose",
+      "ios_subtitle": "Hardware button combo, then share the archive",
+      "message_title": "Suspicious message",
+      "message_subtitle": "Share, screenshot, or paste the message"
+    },
+    "consent": {
+      "title": "Consent before upload",
+      "footer": "The file is encrypted on this phone to the case key before upload. You can review or discard later from My data.",
+      "checkbox": "I understand and consent to send this artefact",
+      "button": "Encrypt and upload",
+      "disclosure_android": "A bugreport can include installed apps, system logs, Wi\u2011Fi networks, account identifiers, and sometimes location history.",
+      "disclosure_ios": "A sysdiagnose can include process lists, system logs, crash reports, network details, and other diagnostics collected by iOS.",
+      "disclosure_message": "The message text, metadata you entered, and any screenshots will be sent encrypted to the analyst handling your case."
+    },
+    "my_data": {
+      "title": "My data",
+      "device_heading": "Device",
+      "artefacts_heading": "Artefacts on this phone",
+      "empty": "Nothing queued yet.",
+      "clear_button": "Clear local enrollment"
+    },
+    "android_bugreport": {
+      "title": "Android bugreport",
+      "headline": "We need a full system bugreport",
+      "body": "Android will create a ZIP with logs, installed apps, and crash data. You stay in control: you start it from Developer options and share it into this app."
+    },
+    "ios_sysdiagnose": {
+      "title": "iOS sysdiagnose",
+      "headline": "Prepare the phone",
+      "body": "Unlock the phone, connect to Wi\u2011Fi, and charge above 30%. Sysdiagnose is heavy on CPU and storage."
+    },
+    "message_report": {
+      "title": "Suspicious message",
+      "lead": "We never open links on this device. Confirm any URL we detect below.",
+      "button": "Continue to consent"
+    }
+  }
 }

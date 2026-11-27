@@ -49,10 +49,10 @@ Usage:
 
 Email OTP:
   1) start with --email user@example.com  (domain must belong to a company)
-  2) confirm with --code <6-digit> (lab servers return lab_otp automatically)
+  2) confirm with --code <6-digit> (a lab key also works as the confirmation code)
 
 Lab quick path:
-  --lab-key LAB-DEMO01   (OTP returned as lab_otp; key itself also works as code)
+  --lab-key LAB-DEMO01   (loopback development key; key itself works as confirmation code)
 
 TLS (lab self-signed):
   --insecure           Skip TLS certificate verification

@@ -12,11 +12,14 @@ mod lab;
 mod mobile;
 mod noise;
 mod otp;
+mod otp_delivery;
 mod ratelimit;
 mod settings;
+mod storage;
 mod store;
 mod tls;
 mod uploads;
+mod version;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -53,7 +56,7 @@ use crate::store::UploadStore;
 #[derive(Debug, Parser)]
 #[command(
     name = "collectemoi-api",
-    version,
+    version = crate::version::VERSION,
     about = "CollecteMoi device API server"
 )]
 struct Args {
@@ -111,20 +114,32 @@ struct Args {
     #[arg(long, default_value = "collectemoi_api=info")]
     log: String,
 
-    /// Include OTP in /v1/enroll/start responses (lab). Codes are always written to enrollment_log.jsonl.
-    #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
+    /// Include OTP in /v1/enroll/start responses (development only; insecure for real users).
+    #[arg(long, default_value_t = false, action = clap::ArgAction::Set)]
     lab_reveal_otp: bool,
+
+    /// Webhook URL that receives enroll OTP JSON (email delivery). Empty = not configured.
+    #[arg(long, default_value = "", env = "COLLECTEMOI_OTP_WEBHOOK_URL")]
+    otp_delivery_webhook_url: String,
+
+    /// Optional Bearer token for the OTP delivery webhook.
+    #[arg(long, default_value = "", env = "COLLECTEMOI_OTP_WEBHOOK_TOKEN")]
+    otp_delivery_webhook_token: String,
 
     /// Enable per-IP rate limits + concurrency cap (application-layer DDoS / abuse shield).
     #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
     rate_limit: bool,
 
     /// Max in-flight HTTP requests (whole process). Extra connections wait / fail when saturated.
-    #[arg(long, default_value_t = 256)]
+    #[arg(long, default_value_t = 1024)]
     max_concurrent: usize,
 
+    /// SQLite connection pool size (`0` = auto from CPU count).
+    #[arg(long, default_value_t = 0)]
+    db_pool_size: usize,
+
     /// Per-request timeout in seconds (slowloris / hung-client protection). Upload-friendly default.
-    #[arg(long, default_value_t = 120)]
+    #[arg(long, default_value_t = 300)]
     request_timeout_secs: u64,
 
     /// General requests allowed per IP per rolling minute.
@@ -139,6 +154,18 @@ struct Args {
     #[arg(long, default_value_t = 30)]
     rate_limit_enroll: u32,
 
+    /// Chunk upload requests allowed per IP per rolling minute (raise behind shared NAT).
+    #[arg(long, default_value_t = 3000)]
+    rate_limit_upload: u32,
+
+    /// New upload sessions (`POST /v1/uploads`) allowed per device id per rolling window.
+    #[arg(long, default_value_t = 10)]
+    rate_limit_device_uploads: u32,
+
+    /// Rolling window (seconds) for `--rate-limit-device-uploads` (default 1 hour).
+    #[arg(long, default_value_t = 3600)]
+    rate_limit_device_window_secs: u64,
+
     /// Offline recovery: set the admin password and exit (does not start the server).
     /// Prefer `collectemoictl reset-password`. Password from `--new-password` or
     /// `COLLECTEMOI_ADMIN_PASSWORD`.
@@ -146,7 +173,7 @@ struct Args {
     reset_admin_password: bool,
 
     /// New admin password for `--reset-admin-password` (or set COLLECTEMOI_ADMIN_PASSWORD).
-    #[arg(long)]
+    #[arg(long, allow_hyphen_values = true)]
     new_password: Option<String>,
 
     /// With `--reset-admin-password`: also disable TOTP and delete security keys.
@@ -188,7 +215,7 @@ async fn main() -> anyhow::Result<()> {
 
     // SQLite is the source of truth for all metadata/config/audit.
     // Large ciphertext/plaintext files stay under data/{uploads,blobs}/.
-    let db = Arc::new(Db::open(&args.data_dir)?);
+    let db = Arc::new(Db::open_with_pool_size(&args.data_dir, args.db_pool_size)?);
 
     if args.force_admin_setup {
         let report = auth::offline_force_setup(&db)?;
@@ -221,9 +248,28 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    tracing::info!(db = %db.path().display(), "sqlite catalogue ready");
-
+    tracing::info!(
+        db = %db.path().display(),
+        pool = db.pool_size(),
+        "sqlite catalogue ready"
+    );
     let public_url = normalize_public_url(&args.public_url, args.tls);
+    let seed_demo_lab_keys = args
+        .bind
+        .parse::<SocketAddr>()
+        .map(|addr| addr.ip().is_loopback())
+        .unwrap_or(false);
+    if seed_demo_lab_keys {
+        tracing::info!("loopback bind — seeding demo companies, lab keys, and enrollment tokens when catalogue is empty");
+    } else {
+        tracing::info!("non-loopback bind — starting without demo companies/lab keys/tokens (create them in admin)");
+    }
+    if args.lab_reveal_otp {
+        tracing::warn!("lab OTP responses are enabled; email enrollment codes will be exposed by the API");
+    }
+    if args.lab_seal && !seed_demo_lab_keys {
+        tracing::warn!("lab sealing is enabled on a non-loopback listener; web clients send device private keys to this server");
+    }
 
     let store = Arc::new(UploadStore::open(&args.data_dir, db.clone())?);
     let blobs = Arc::new(BlobStore::open(&args.data_dir, db.clone())?);
@@ -235,12 +281,14 @@ async fn main() -> anyhow::Result<()> {
             public_url: public_url.clone(),
             case_pk: args.case_pk.clone(),
             case_sk: args.case_sk.clone(),
+            seed_demo_tokens: seed_demo_lab_keys,
         },
     )?);
     let otp = Arc::new(OtpStore::open(
         &args.data_dir,
         db.clone(),
         args.lab_reveal_otp,
+        seed_demo_lab_keys,
     )?);
 
     let tls_paths = if args.tls {
@@ -273,6 +321,8 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or_default(),
         http_bind: normalize_http_bind(&args.http_bind, args.tls),
         lab_reveal_otp: args.lab_reveal_otp,
+        otp_delivery_webhook_url: args.otp_delivery_webhook_url.clone(),
+        otp_delivery_webhook_token: args.otp_delivery_webhook_token.clone(),
     };
     // Overlay lab toggles saved from the admin console so restart keeps them.
     if let Some(persisted) = settings::load_persisted(&db) {
@@ -282,7 +332,21 @@ async fn main() -> anyhow::Result<()> {
             public_url = %runtime.public_url,
             lab_seal = runtime.lab_seal,
             allow_dev_envelope = runtime.allow_dev_envelope,
+            otp_webhook = !runtime.otp_delivery_webhook_url.is_empty(),
             "restored persisted runtime settings"
+        );
+    }
+    // CLI / env webhook wins when provided (so deploy can inject without wiping SQLite).
+    if !args.otp_delivery_webhook_url.trim().is_empty() {
+        runtime.otp_delivery_webhook_url = args.otp_delivery_webhook_url.trim().to_string();
+    }
+    if !args.otp_delivery_webhook_token.trim().is_empty() {
+        runtime.otp_delivery_webhook_token = args.otp_delivery_webhook_token.trim().to_string();
+    }
+    if runtime.otp_webhook_configured() {
+        tracing::info!(
+            url = %runtime.otp_delivery_webhook_url,
+            "OTP delivery webhook configured"
         );
     }
     // Keep enrollment store in sync with the effective public URL / name.
@@ -302,6 +366,9 @@ async fn main() -> anyhow::Result<()> {
         general_per_min: args.rate_limit_general.max(10),
         auth_per_min: args.rate_limit_auth.max(5),
         enroll_per_min: args.rate_limit_enroll.max(5),
+        upload_per_min: args.rate_limit_upload.max(60),
+        device_uploads_per_hour: args.rate_limit_device_uploads.max(1),
+        device_upload_window_secs: args.rate_limit_device_window_secs.max(60),
         ..RateLimitConfig::default()
     });
     let state = AppState {
@@ -414,7 +481,7 @@ fn build_router(
 
     Router::new()
         .route("/healthz", get(admin::healthz))
-        .route("/v1/status", get(admin::status))
+        .route("/v1/status", get(admin::public_status))
         .route("/admin", get(admin::console))
         .route("/admin/", get(admin::console))
         .route("/v1/admin/auth/status", get(auth::auth_status))
@@ -461,12 +528,22 @@ fn build_router(
             "/v1/admin/settings",
             get(admin::get_settings).patch(admin::patch_settings),
         )
+        .route("/v1/admin/storage", get(admin::storage))
+        .route("/v1/admin/storage/wipe", axum::routing::post(admin::wipe_storage))
         .route("/v1/admin/devices", get(admin::list_devices))
         .route("/v1/admin/devices/{id}/ban", post(admin::set_device_ban))
+        .route(
+            "/v1/admin/devices/{id}/rate-limit-bypass",
+            post(admin::set_device_rate_limit_bypass),
+        )
         .route("/v1/admin/keys", get(admin::list_client_keys))
         .route("/v1/admin/keys/ban", post(admin::ban_public_key))
         .route("/v1/admin/keys/unban", post(admin::unban_public_key))
         .route("/v1/admin/uploads", get(admin::list_uploads))
+        .route(
+            "/v1/admin/uploads/{id}",
+            axum::routing::delete(admin::delete_upload),
+        )
         .route("/v1/admin/jobs", get(admin::list_jobs))
         .route("/v1/admin/analysis", get(admin::list_analysis))
         .route("/v1/admin/blobs", get(blobs::list_blobs))
@@ -513,6 +590,10 @@ fn build_router(
         .route(
             "/v1/admin/branding",
             get(branding::get_branding).put(branding::put_branding),
+        )
+        .route(
+            "/v1/admin/i18n/catalog",
+            get(branding::get_i18n_catalog),
         )
         .route(
             "/v1/admin/branding/assets",

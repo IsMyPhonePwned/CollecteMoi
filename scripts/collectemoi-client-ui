@@ -11,7 +11,7 @@ PORT="8090"
 SERVER="https://127.0.0.1:8080"
 SESSION="$CLIENT/.collectemoi/session.json"
 OPEN=0
-INSECURE=1
+INSECURE=0
 TLS_CA=""
 
 usage() {
@@ -23,7 +23,7 @@ Options:
   --port <n>          UI listen port (default: 8090)
   --server <url>      CollecteMoi API URL (default: https://127.0.0.1:8080)
   --session <path>    Session file (default: clients/node/.collectemoi/session.json)
-  --insecure          Trust self-signed API cert (default)
+  --insecure          Skip API certificate verification (lab only; off by default)
   --secure            Require valid TLS cert
   --tls-ca <pem>      Trust this CA/cert PEM
   --no-open           Do not open a browser tab (default)

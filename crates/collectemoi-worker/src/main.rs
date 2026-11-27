@@ -8,6 +8,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -18,10 +19,26 @@ use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
 use tracing_subscriber::EnvFilter;
 
+const VERSION: &str = {
+    const BAKED: &str = env!("COLLECTEMOI_BUILD_VERSION");
+    if BAKED.is_empty() {
+        env!("CARGO_PKG_VERSION")
+    } else {
+        BAKED
+    }
+};
+
+fn default_workers() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().saturating_mul(2))
+        .unwrap_or(8)
+        .clamp(8, 32)
+}
+
 #[derive(Debug, Parser)]
 #[command(
     name = "collectemoi-worker",
-    version,
+    version = VERSION,
     about = "Decrypt completed uploads into opaque blobs (no parsers)"
 )]
 struct Args {
@@ -29,13 +46,17 @@ struct Args {
     #[arg(long, default_value = "./data")]
     data_dir: PathBuf,
 
-    /// Poll interval in seconds
-    #[arg(long, default_value_t = 2)]
+    /// Idle poll interval in seconds (busy queue polls faster)
+    #[arg(long, default_value_t = 1)]
     poll_secs: u64,
 
-    /// Max jobs processed in parallel
-    #[arg(long, default_value_t = 4)]
+    /// Max jobs processed in parallel (`0` = auto from CPU count)
+    #[arg(long, default_value_t = 0)]
     workers: usize,
+
+    /// SQLite connection pool size (`0` = auto)
+    #[arg(long, default_value_t = 0)]
+    db_pool_size: usize,
 
     /// Optional case public key file (hex). Default: <data-dir>/keys/case.pk.hex
     #[arg(long)]
@@ -62,8 +83,12 @@ async fn main() -> Result<()> {
     fs::create_dir_all(&blobs_dir)?;
     fs::create_dir_all(args.data_dir.join("jobs"))?;
 
-    let db = Arc::new(Db::open(&args.data_dir)?);
-    tracing::info!(db = %db.path().display(), "sqlite catalogue ready");
+    let db = Arc::new(Db::open_with_pool_size(&args.data_dir, args.db_pool_size)?);
+    tracing::info!(
+        db = %db.path().display(),
+        pool = db.pool_size(),
+        "sqlite catalogue ready"
+    );
 
     let keys_dir = args.data_dir.join("keys");
     let case = Arc::new(load_case_keys(
@@ -71,8 +96,13 @@ async fn main() -> Result<()> {
         args.case_pk.as_deref(),
         args.case_sk.as_deref(),
     )?);
-    let workers = args.workers.max(1);
+    let workers = if args.workers == 0 {
+        default_workers()
+    } else {
+        args.workers.max(1)
+    };
     let sem = Arc::new(Semaphore::new(workers));
+    let in_flight = Arc::new(AtomicUsize::new(0));
 
     tracing::info!(
         data = %args.data_dir.display(),
@@ -81,66 +111,96 @@ async fn main() -> Result<()> {
     );
 
     loop {
-        if let Err(e) = poll_once(db.clone(), &blobs_dir, case.clone(), sem.clone()).await {
-            tracing::error!(error = %e, "poll cycle failed");
-        }
-        tokio::time::sleep(Duration::from_secs(args.poll_secs)).await;
+        let idle = match fill_slots(
+            db.clone(),
+            &blobs_dir,
+            case.clone(),
+            sem.clone(),
+            in_flight.clone(),
+            workers,
+        )
+        .await
+        {
+            Ok(n) => n == 0,
+            Err(e) => {
+                tracing::error!(error = %e, "poll cycle failed");
+                true
+            }
+        };
+        let delay = if idle {
+            Duration::from_secs(args.poll_secs.max(1))
+        } else {
+            // Keep claiming while the queue is hot; brief yield for fair scheduling.
+            Duration::from_millis(50)
+        };
+        tokio::time::sleep(delay).await;
     }
 }
 
-async fn poll_once(
+/// Claim and spawn up to free worker slots. Returns how many jobs were started.
+async fn fill_slots(
     db: Arc<Db>,
     blobs_dir: &Path,
     case: Arc<CaseKeyPair>,
     sem: Arc<Semaphore>,
-) -> Result<()> {
-    let pending = db.job_list_pending(64)?;
-    let mut handles = Vec::new();
+    in_flight: Arc<AtomicUsize>,
+    workers: usize,
+) -> Result<usize> {
+    let free = workers.saturating_sub(in_flight.load(Ordering::SeqCst));
+    if free == 0 {
+        return Ok(0);
+    }
 
-    for job in pending {
-        let claimed = match db.job_claim(&job.upload_id)? {
-            Some(j) => j,
-            None => continue,
-        };
+    let claimed = {
+        let db = db.clone();
+        tokio::task::spawn_blocking(move || db.job_claim_batch(free))
+            .await
+            .context("claim batch join")??
+    };
+    if claimed.is_empty() {
+        return Ok(0);
+    }
 
+    let started = claimed.len();
+    for job in claimed {
         let permit = sem.clone().acquire_owned().await?;
+        in_flight.fetch_add(1, Ordering::SeqCst);
         let case = case.clone();
         let blobs_dir = blobs_dir.to_path_buf();
         let db = db.clone();
-        handles.push(tokio::task::spawn_blocking(move || {
+        let in_flight = in_flight.clone();
+        tokio::task::spawn_blocking(move || {
             let _permit = permit;
-            tracing::info!(upload = %claimed.upload_id, artefact = %claimed.artefact, "processing job");
-            match process_job(&claimed, &blobs_dir, &case, &db) {
-                Ok(blob_id) => {
-                    db.job_mark_done(&claimed.upload_id)?;
-                    // Best-effort cleanup of legacy JSON job drops.
-                    let jobs = blobs_dir
-                        .parent()
-                        .unwrap_or(Path::new("."))
-                        .join("jobs");
-                    for ext in ["json", "json.claimed", "json.done"] {
-                        let _ = fs::remove_file(jobs.join(format!("{}.{}", claimed.upload_id, ext)));
+            tracing::info!(upload = %job.upload_id, artefact = %job.artefact, "processing job");
+            let result = (|| -> Result<()> {
+                match process_job(&job, &blobs_dir, &case, &db) {
+                    Ok(blob_id) => {
+                        db.job_mark_done(&job.upload_id)?;
+                        let jobs = blobs_dir
+                            .parent()
+                            .unwrap_or(Path::new("."))
+                            .join("jobs");
+                        for ext in ["json", "json.claimed", "json.done"] {
+                            let _ =
+                                fs::remove_file(jobs.join(format!("{}.{}", job.upload_id, ext)));
+                        }
+                        tracing::info!(upload = %job.upload_id, blob = %blob_id, "blob stored");
+                        Ok(())
                     }
-                    tracing::info!(upload = %claimed.upload_id, blob = %blob_id, "blob stored");
-                    Ok::<(), anyhow::Error>(())
+                    Err(e) => {
+                        tracing::error!(upload = %job.upload_id, error = %e, "job failed");
+                        let _ = db.job_mark_failed(&job.upload_id, &e.to_string());
+                        Err(e)
+                    }
                 }
-                Err(e) => {
-                    tracing::error!(upload = %claimed.upload_id, error = %e, "job failed");
-                    let _ = db.job_mark_failed(&claimed.upload_id, &e.to_string());
-                    Err(e)
-                }
+            })();
+            in_flight.fetch_sub(1, Ordering::SeqCst);
+            if let Err(e) = result {
+                tracing::warn!(upload = %job.upload_id, error = %e, "job task error");
             }
-        }));
+        });
     }
-
-    for h in handles {
-        match h.await {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => tracing::warn!(error = %e, "job task error"),
-            Err(e) => tracing::warn!(error = %e, "job task join error"),
-        }
-    }
-    Ok(())
+    Ok(started)
 }
 
 fn process_job(job: &JobRow, blobs_dir: &Path, case: &CaseKeyPair, db: &Db) -> Result<String> {
@@ -188,6 +248,7 @@ fn process_job(job: &JobRow, blobs_dir: &Path, case: &CaseKeyPair, db: &Db) -> R
 
     let created_at = now_secs_str();
     let filename = safe_filename(&suggested_filename(&artefact, looks_like_zip(&plaintext)));
+    let content_type = suggested_content_type(&artefact, &plaintext);
     let meta = BlobRow {
         blob_id: blob_id.clone(),
         upload_id: blob_id.clone(),
@@ -199,7 +260,7 @@ fn process_job(job: &JobRow, blobs_dir: &Path, case: &CaseKeyPair, db: &Db) -> R
         queued_at: job.queued_at.clone(),
         device_public_key: job.device_public_key.trim().to_string(),
         filename: filename.clone(),
-        content_type: "application/octet-stream".into(),
+        content_type,
     };
     db.blob_upsert(&meta)?;
 
@@ -244,8 +305,21 @@ fn suggested_filename(artefact: &str, is_zip: bool) -> String {
         "android_bugreport" if is_zip => "bugreport.zip".into(),
         "android_bugreport" => "bugreport.bin".into(),
         "ios_sysdiagnose" => "sysdiagnose.tar.gz".into(),
-        "message_report" => "message_report.bin".into(),
+        "message_report" => "message_report.json".into(),
         other => format!("{other}.bin"),
+    }
+}
+
+fn suggested_content_type(artefact: &str, plaintext: &[u8]) -> String {
+    match artefact {
+        "message_report" => "application/json; charset=utf-8".into(),
+        "android_bugreport" if looks_like_zip(plaintext) => "application/zip".into(),
+        "ios_sysdiagnose"
+            if plaintext.len() >= 2 && plaintext[0] == 0x1f && plaintext[1] == 0x8b =>
+        {
+            "application/gzip".into()
+        }
+        _ => "application/octet-stream".into(),
     }
 }
 

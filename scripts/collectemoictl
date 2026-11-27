@@ -112,6 +112,7 @@ ${C_BOLD}COMMANDS${C_RESET}
   logs                  Tail process logs
   version               ctl + binary versions
   open                  Open admin console in the default browser
+  tui                   Terminal admin dashboard (Ratatui; runs alongside /admin)
   reset-password        Set a new admin password (local recovery; no old password needed)
   export                Backup SQLite (+ optional keys/blobs) to a zip
   import                Restore a backup zip (requires --force)
@@ -159,7 +160,7 @@ ${C_BOLD}BACKUP${C_RESET}
       Uses live HTTPS admin API when up; otherwise offline zip I/O.
 
 ${C_BOLD}DOCKER DEPLOY${C_RESET}
-  package [--platform linux/amd64|linux/arm64] [--tag image:tag] [--out file.tar.gz]
+  package [--platform linux/amd64|linux/arm64] [--version ver] [--tag image:tag] [--out file.tar.gz]
   push <user@host> [--ssh-port n] [--port n] [--public-url https://host:port]
        push replaces only collectemoi-test-api/worker and keeps their named data volume.
        Requires Docker Buildx locally and Docker + SSH access on the VPS.
@@ -171,6 +172,9 @@ ${C_BOLD}EXAMPLES${C_RESET}
   $b health && echo ready
   $b logs -f --source api
   $b doctor
+  $b open
+  $b tui
+  $b tui --password 'secret' --poll-secs 2
   $b reset-password
   $b reset-password --password 'new-secret' --yes
   $b reset-password --force-setup --yes
@@ -644,6 +648,74 @@ cmd_open() {
   fi
 }
 
+ensure_tui_built() {
+  local need_build=0
+  if [[ ! -x "$ROOT/target/debug/collectemoi-tui" ]]; then
+    need_build=1
+  elif [[ -n "$(find "$ROOT/crates/collectemoi-tui" -type f \( -name '*.rs' -o -name 'Cargo.toml' \) -newer "$ROOT/target/debug/collectemoi-tui" 2>/dev/null | head -1)" ]]; then
+    need_build=1
+  fi
+  if [[ "$need_build" -eq 1 ]]; then
+    info "building collectemoi-tui…"
+    local t0
+    t0="$(date +%s)"
+    # Keep stdin intact for the later password prompt (cargo must not drain it).
+    (cd "$ROOT" && env -u CARGO_TARGET_DIR cargo build -p collectemoi-tui </dev/null)
+    ok "tui build finished in $(( $(date +%s) - t0 ))s"
+  fi
+}
+
+cmd_tui() {
+  load_run_config
+  ensure_tui_built
+  local server="${PUBLIC_URL:-https://127.0.0.1:8080}"
+  local password="" poll_secs="" totp="" check=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --server) server="${2:-}"; shift 2 ;;
+      --password) password="${2:-}"; shift 2 ;;
+      --totp) totp="${2:-}"; shift 2 ;;
+      --poll-secs) poll_secs="${2:-}"; shift 2 ;;
+      --check) check=1; shift ;;
+      --help|-h)
+        cat <<EOF
+Usage: $(basename "$0") tui [--server URL] [--password PW] [--totp CODE] [--poll-secs N] [--check]
+
+Terminal admin dashboard (Ratatui). Same cookie login as /admin — leave the
+web UI open; this is a second window over the live API.
+
+  --server URL      Default: \$PUBLIC_URL from last start (or https://127.0.0.1:8080)
+  --password PW     Prompted on /dev/tty if omitted
+  --totp CODE       Prompted when MFA is required
+  --poll-secs N     Refresh interval (default: 3)
+  --check           Login + one refresh, print summary, exit (no TTY)
+EOF
+        return 0
+        ;;
+      *) err "unknown tui option: $1"; return 1 ;;
+    esac
+  done
+
+  local args=(--server "$server")
+  # Pass secrets via env (not argv) so passwords starting with '-' and `ps` leaks
+  # are handled safely. The TUI prompts on /dev/tty when unset.
+  # Honour an already-exported COLLECTEMOI_TUI_PASSWORD when --password is omitted.
+  if [[ -n "$password" ]]; then
+    export COLLECTEMOI_TUI_PASSWORD="$password"
+  fi
+  if [[ -n "$totp" ]]; then
+    export COLLECTEMOI_TUI_TOTP="$totp"
+  fi
+  [[ -n "$poll_secs" ]] && args+=(--poll-secs "$poll_secs")
+  [[ "$check" -eq 1 ]] && args+=(--check)
+  if ! curl -kfsS "$server/healthz" >/dev/null 2>&1; then
+    warn "API not healthy at $server — start with: $0 start"
+  fi
+  info "admin TUI → $server  (same login as /admin)"
+  # Prefer exec so the TUI owns the TTY (raw mode / alternate screen).
+  exec "$ROOT/target/debug/collectemoi-tui" "${args[@]}"
+}
+
 cmd_status() {
   parse_opts "$@" 2>/dev/null || true
   load_run_config
@@ -839,23 +911,8 @@ kv("uptime", f"{h}h {m}m {sec}s")
 kv("display", s.get("display_name") or "—")
 kv("devices", o.get("devices"))
 kv("uploads", f"{o.get('uploads_complete')}/{o.get('uploads')} complete")
-kv("blobs", f"{o.get('blobs')}  ({o.get('blob_downloads') or 0} downloads)")
+kv("blobs", o.get("blobs"))
 kv("jobs", f"{o.get('jobs_pending')} pending")
-kv("access", f"{o.get('access_total') or 0} hits")
-kv("companies", f"{o.get('companies')}   lab_keys={o.get('lab_keys')}   banned={o.get('banned_keys')}")
-kv("enroll", f"{o.get('enrollment_events')} events")
-pk = o.get("case_public_key") or ""
-if len(pk) > 32:
-    kv("case pk", f"{pk[:16]}…{pk[-8:]}")
-else:
-    kv("case pk", pk or "—")
-recent = o.get("recent_enrollment") or []
-if recent:
-    print("  recent enroll")
-    for e in recent[:5]:
-        who = e.get("email") or e.get("lab_key") or "—"
-        detail = (e.get("detail") or "")[:56]
-        print(f"    · {e.get('event')}  {who}  {detail}")
 PY
   elif [[ "$health" != "ok" ]]; then
     hdr "Catalogue"
@@ -1363,19 +1420,31 @@ docker_package_args() {
   PACKAGE_PLATFORM="linux/amd64"
   PACKAGE_TAG="collectemoi:deploy-$(date +%Y%m%d-%H%M%S)"
   PACKAGE_OUT=""
+  PACKAGE_VERSION=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --platform) [[ $# -ge 2 ]] || { err "--platform requires a value"; return 1; }; PACKAGE_PLATFORM="$2"; shift 2 ;;
       --tag) [[ $# -ge 2 ]] || { err "--tag requires a value"; return 1; }; PACKAGE_TAG="$2"; shift 2 ;;
+      --version) [[ $# -ge 2 ]] || { err "--version requires a value"; return 1; }; PACKAGE_VERSION="$2"; shift 2 ;;
       --out) [[ $# -ge 2 ]] || { err "--out requires a path"; return 1; }; PACKAGE_OUT="$2"; shift 2 ;;
       -h|--help) usage; return 2 ;;
       *) err "unknown package option: $1"; return 1 ;;
     esac
   done
   case "$PACKAGE_PLATFORM" in linux/amd64|linux/arm64) ;; *) err "supported platforms: linux/amd64, linux/arm64"; return 1 ;; esac
+  if [[ -n "$PACKAGE_VERSION" && "$PACKAGE_TAG" == collectemoi:deploy-* ]]; then
+    local safe
+    safe="$(printf '%s' "$PACKAGE_VERSION" | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//')"
+    [[ -n "$safe" ]] || { err "invalid --version value"; return 1; }
+    PACKAGE_TAG="collectemoi:${safe}"
+  fi
   [[ "$PACKAGE_TAG" =~ ^[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+$ ]] || { err "invalid Docker image tag: $PACKAGE_TAG"; return 1; }
   if [[ -z "$PACKAGE_OUT" ]]; then
-    PACKAGE_OUT="$ROOT/dist/collectemoi-$(date +%Y%m%d-%H%M%S).tar.gz"
+    if [[ -n "$PACKAGE_VERSION" ]]; then
+      PACKAGE_OUT="$ROOT/dist/collectemoi-${PACKAGE_VERSION}.tar.gz"
+    else
+      PACKAGE_OUT="$ROOT/dist/collectemoi-$(date +%Y%m%d-%H%M%S).tar.gz"
+    fi
   elif [[ "$PACKAGE_OUT" != /* ]]; then
     PACKAGE_OUT="$PWD/$PACKAGE_OUT"
   fi
@@ -1388,7 +1457,10 @@ build_docker_package() {
   mkdir -p "$(dirname "$PACKAGE_OUT")"
   hdr "Docker package"
   info "building $PACKAGE_TAG for $PACKAGE_PLATFORM"
-  docker buildx build --platform "$PACKAGE_PLATFORM" --tag "$PACKAGE_TAG" --load "$ROOT"
+  [[ -n "$PACKAGE_VERSION" ]] && info "version: $PACKAGE_VERSION"
+  local -a bx=(buildx build --platform "$PACKAGE_PLATFORM" --tag "$PACKAGE_TAG" --load)
+  [[ -n "$PACKAGE_VERSION" ]] && bx+=(--build-arg "COLLECTEMOI_VERSION=${PACKAGE_VERSION}")
+  docker "${bx[@]}" "$ROOT"
   out_tmp="${PACKAGE_OUT}.tmp.$$"
   if ! docker save "$PACKAGE_TAG" | gzip -c > "$out_tmp"; then
     rm -f "$out_tmp"
@@ -1396,11 +1468,16 @@ build_docker_package() {
     return 1
   fi
   mv "$out_tmp" "$PACKAGE_OUT"
-  ok "wrote $PACKAGE_OUT"
+  printf '\n'
+  ok "Docker image archive ready"
+  printf '  %sArchive:%s  %s%s%s\n' "$C_BOLD" "$C_RESET" "$C_GREEN" "$PACKAGE_OUT" "$C_RESET"
   info "image: $PACKAGE_TAG"
+  [[ -n "${PACKAGE_VERSION:-}" ]] && info "version: $PACKAGE_VERSION"
   if command -v shasum >/dev/null 2>&1; then
     info "sha256: $(shasum -a 256 "$PACKAGE_OUT" | awk '{print $1}')"
   fi
+  info "load later with:  docker load < $(printf '%q' "$PACKAGE_OUT")"
+  printf '\n'
 }
 
 cmd_package() {
@@ -1454,19 +1531,25 @@ archive="$1"; image="$2"; public_url="$3"; port="$4"
 command -v docker >/dev/null 2>&1 || { echo "Docker is required on the VPS" >&2; exit 1; }
 docker load -i "$archive"
 docker volume create collectemoi-test-data >/dev/null
+# Replace containers only — never docker volume rm (keeps SQLite/uploads/TLS).
 docker rm -f collectemoi-test-api collectemoi-test-worker >/dev/null 2>&1 || true
 docker run -d --name collectemoi-test-api --restart unless-stopped \
-  -p "$port:8080" -v collectemoi-test-data:/data \
-  "$image" --data-dir /data --bind 0.0.0.0:8080 --public-url "$public_url" --lab-seal true >/dev/null
+  -p "$port:8080" -p "$((port + 1)):8081" -v collectemoi-test-data:/data \
+  -e COLLECTEMOI_PUBLIC_URL="$public_url" \
+  -e COLLECTEMOI_BIND=0.0.0.0:8080 \
+  -e COLLECTEMOI_HTTP_BIND=0.0.0.0:8081 \
+  -e COLLECTEMOI_LAB_SEAL=true \
+  "$image" api >/dev/null
 docker run -d --name collectemoi-test-worker --restart unless-stopped \
-  -v collectemoi-test-data:/data --entrypoint /usr/local/bin/collectemoi-worker \
-  "$image" --data-dir /data --poll-secs 2 >/dev/null
+  -v collectemoi-test-data:/data \
+  -e COLLECTEMOI_WORKER_POLL_SECS=2 \
+  "$image" worker >/dev/null
 rm -f "$archive"
 printf 'API: %s\nAdmin: %s/admin\n' "$public_url" "$public_url"
-printf 'Persistent data volume: collectemoi-test-data\n'
+printf 'Persistent data volume: collectemoi-test-data (kept across push/image updates)\n'
 REMOTE_SCRIPT
   ok "quick-test deployment is running on $target"
-  info "data persists in Docker volume collectemoi-test-data"
+  info "data persists in Docker volume collectemoi-test-data (push replaces containers only)"
 }
 
 main() {
@@ -1482,6 +1565,7 @@ main() {
     logs) cmd_logs "$@" ;;
     version|--version|-V) cmd_version "$@" ;;
     open) cmd_open "$@" ;;
+    tui|console) cmd_tui "$@" ;;
     reset-password|reset-admin-password) cmd_reset_password "$@" ;;
     export) cmd_export "$@" ;;
     import) cmd_import "$@" ;;
