@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="upload_channel_name">Envois</string>
+    <string name="upload_channel_desc">Affichée pendant que CollecteMoi envoie des fichiers en arrière-plan</string>
+    <string name="upload_result_channel_name">Résultats d’envoi</string>
+    <string name="upload_result_channel_desc">Affichée lorsqu’un envoi CollecteMoi se termine</string>
+    <string name="upload_notif_title_default">Envoi…</string>
+    <string name="upload_notif_text_default">CollecteMoi envoie un fichier en arrière-plan.</string>
+</resources>

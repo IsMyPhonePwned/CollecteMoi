@@ -1,0 +1,500 @@
+#!/usr/bin/env bash
+# Build / package / run the CollecteMoi Docker image.
+# First build downloads Flutter + Android SDK (several GB).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TAG="${COLLECTEMOI_DOCKER_TAG:-collectemoi:local}"
+# Android cmdline-tools are x86_64 — default amd64 (incl. Apple Silicon).
+PLATFORM="${COLLECTEMOI_DOCKER_PLATFORM:-linux/amd64}"
+# Named volume for SQLite / TLS / uploads / blobs — survives image upgrades.
+VOLUME="${COLLECTEMOI_DOCKER_VOLUME:-collectemoi-data}"
+# Optional release label baked into binaries + admin UI (also → image tag if still :local).
+VERSION="${COLLECTEMOI_VERSION:-}"
+TAG_EXPLICIT=0
+OUT=""           # optional tar.gz path (--out)
+NO_ARCHIVE=0     # skip tar.gz on versioned build
+NO_CACHE=0
+PULL=0
+QUIET=0
+YES=0            # required for wipe-data
+
+_use_color() {
+  [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]] && [[ "${TERM:-}" != "dumb" ]]
+}
+if _use_color; then
+  C_RESET=$'\033[0m'; C_DIM=$'\033[2m'; C_BOLD=$'\033[1m'
+  C_RED=$'\033[31m'; C_GREEN=$'\033[32m'; C_CYAN=$'\033[36m'; C_YELLOW=$'\033[33m'
+else
+  C_RESET=""; C_DIM=""; C_BOLD=""; C_RED=""; C_GREEN=""; C_CYAN=""; C_YELLOW=""
+fi
+ok()   { printf '%s✓%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
+warn() { printf '%s!%s %s\n' "$C_YELLOW" "$C_RESET" "$*" >&2; }
+err()  { printf '%s✗%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; }
+info() { [[ "$QUIET" -eq 1 ]] || printf '%s·%s %s\n' "$C_CYAN" "$C_RESET" "$*"; }
+
+usage() {
+  local b
+  b="$(basename "$0")"
+  cat <<EOF
+${C_BOLD}CollecteMoi Docker${C_RESET}
+
+Usage:
+  $b [build] [options]
+  $b package [options] [--out file.tar.gz]
+  $b up [options] [-- ...]          # compose up --build (keeps data volume)
+  $b update [options] [-- ...]      # rebuild/recreate containers; never wipe data
+  $b load <archive.tar.gz> [opts]   # docker load + update (keeps data volume)
+  $b run [options] [-- ...]         # docker run … all (always mounts data volume)
+  $b wipe-data --yes                # DANGER: delete the named data volume
+  $b -h | --help
+
+Options:
+  --version <ver>       Bake release version into image (admin UI + --version)
+                        Also sets image tag to collectemoi:<ver> unless --tag is set
+                        Versioned builds also write dist/collectemoi-<ver>.tar.gz
+  --out <file.tar.gz>   Archive path (build/package; default: dist/collectemoi-<ver>.tar.gz)
+  --no-archive          Skip writing the .tar.gz (image only)
+  --tag <image:tag>     Default: collectemoi:local (or \$COLLECTEMOI_DOCKER_TAG)
+  --platform <plat>     Default: linux/amd64 (or \$COLLECTEMOI_DOCKER_PLATFORM)
+  --volume <name>       Data volume (default: collectemoi-data / \$COLLECTEMOI_DOCKER_VOLUME)
+  --no-cache            Pass --no-cache to docker build
+  --pull                Pass --pull to docker build
+  --yes                 Required confirmation for wipe-data
+  -q | --quiet          Less chatter
+  -h | --help           This help
+
+Examples:
+  $b
+  $b build --version 1.4.0
+  $b build --version 1.4.0 --out ./releases/cm-1.4.0.tar.gz
+  $b up --version 1.4.0 -d
+  $b update --version 1.4.1 -d          # upgrade image; SQLite/uploads kept
+  $b load dist/collectemoi-1.4.1.tar.gz -d
+  $b run
+  $b wipe-data --yes                    # only when you really want a clean slate
+
+Data persistence:
+  Lab data lives in Docker volume "${VOLUME}" mounted at /data.
+  Rebuilding or loading a new image does not erase it.
+  \`docker compose down\` keeps the volume. \`down -v\` also cannot remove it
+  (volume is external). Only \`$b wipe-data --yes\` or \`docker volume rm\` wipes data.
+
+Notes:
+  On Apple Silicon keep --platform linux/amd64 for Google's Android cmdline-tools.
+  Portable archive / VPS deploy: ./scripts/collectemoictl package|push
+  Env: COLLECTEMOI_VERSION, COLLECTEMOI_DOCKER_TAG, COLLECTEMOI_DOCKER_PLATFORM,
+       COLLECTEMOI_DOCKER_VOLUME
+EOF
+}
+
+need_docker() {
+  command -v docker >/dev/null 2>&1 || { err "Docker is required"; exit 1; }
+}
+
+# Idempotent: create the persistent lab-data volume if missing.
+ensure_data_volume() {
+  need_docker
+  if docker volume inspect "$VOLUME" >/dev/null 2>&1; then
+    info "data volume: $VOLUME (kept across image updates)"
+  else
+    info "creating data volume: $VOLUME"
+    docker volume create "$VOLUME" >/dev/null
+    ok "data volume ready: $VOLUME"
+  fi
+}
+
+# True if argv already mounts something on /data (named or bind).
+run_args_have_data_mount() {
+  local i=0
+  local -a a=("$@")
+  while [[ $i -lt ${#a[@]} ]]; do
+    case "${a[$i]}" in
+      -v|--volume)
+        i=$((i + 1))
+        if [[ $i -lt ${#a[@]} && "${a[$i]}" == *:/data ]]; then
+          return 0
+        fi
+        ;;
+      --mount)
+        i=$((i + 1))
+        if [[ $i -lt ${#a[@]} && "${a[$i]}" == *"target=/data"* ]]; then
+          return 0
+        fi
+        ;;
+      -v=*|--volume=*)
+        if [[ "${a[$i]#*=}" == *:/data ]]; then
+          return 0
+        fi
+        ;;
+    esac
+    i=$((i + 1))
+  done
+  return 1
+}
+
+# Parse our flags; unknown args go to EXTRA (for compose/run passthrough when
+# passthrough=1). With passthrough=0, unknown flags are errors.
+parse_common() {
+  local passthrough="${1:-0}"
+  shift || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --version|-V)
+        [[ $# -ge 2 ]] || { err "--version requires a value"; exit 1; }
+        VERSION="$2"
+        shift 2
+        ;;
+      --out)
+        [[ $# -ge 2 ]] || { err "--out requires a path"; exit 1; }
+        OUT="$2"
+        shift 2
+        ;;
+      --no-archive) NO_ARCHIVE=1; shift ;;
+      --tag)
+        [[ $# -ge 2 ]] || { err "--tag requires a value"; exit 1; }
+        TAG="$2"
+        TAG_EXPLICIT=1
+        shift 2
+        ;;
+      --platform) [[ $# -ge 2 ]] || { err "--platform requires a value"; exit 1; }; PLATFORM="$2"; shift 2 ;;
+      --volume)
+        [[ $# -ge 2 ]] || { err "--volume requires a name"; exit 1; }
+        VOLUME="$2"
+        shift 2
+        ;;
+      --no-cache) NO_CACHE=1; shift ;;
+      --pull) PULL=1; shift ;;
+      --yes|-y) YES=1; shift ;;
+      -q|--quiet) QUIET=1; shift ;;
+      -h|--help) usage; exit 0 ;;
+      --) shift; EXTRA+=("$@"); break ;;
+      -*)
+        if [[ "$passthrough" -eq 1 ]]; then
+          EXTRA+=("$1"); shift
+        else
+          err "unknown option: $1"; usage >&2; exit 1
+        fi
+        ;;
+      *) EXTRA+=("$1"); shift ;;
+    esac
+  done
+}
+
+apply_version_tag() {
+  if [[ -n "$VERSION" && "$TAG_EXPLICIT" -eq 0 ]]; then
+    # Sanitize for Docker tag: allow [A-Za-z0-9._-]
+    local safe
+    safe="$(printf '%s' "$VERSION" | tr -c 'A-Za-z0-9._-' '-' | sed 's/^-*//;s/-*$//')"
+    [[ -n "$safe" ]] || { err "invalid --version value"; exit 1; }
+    TAG="collectemoi:${safe}"
+  fi
+}
+
+default_archive_path() {
+  if [[ -n "$VERSION" ]]; then
+    printf '%s\n' "$ROOT/dist/collectemoi-${VERSION}.tar.gz"
+  else
+    printf '%s\n' "$ROOT/dist/collectemoi-$(date +%Y%m%d-%H%M%S).tar.gz"
+  fi
+}
+
+resolve_out_path() {
+  local out="${1:-}"
+  if [[ -z "$out" ]]; then
+    out="$(default_archive_path)"
+  elif [[ "$out" != /* ]]; then
+    out="$PWD/$out"
+  fi
+  printf '%s\n' "$out"
+}
+
+human_size() {
+  local path="$1"
+  if [[ ! -f "$path" ]]; then
+    printf '?\n'
+    return
+  fi
+  if stat -f%z "$path" >/dev/null 2>&1; then
+    # macOS
+    python3 -c "n=int($(stat -f%z "$path")); u=['B','KB','MB','GB','TB']; i=0
+while n>=1024 and i<4: n/=1024; i+=1
+print(f'{n:.1f} {u[i]}' if i else f'{int(n)} {u[i]}')"
+  else
+    python3 -c "n=int($(stat -c%s "$path")); u=['B','KB','MB','GB','TB']; i=0
+while n>=1024 and i<4: n/=1024; i+=1
+print(f'{n:.1f} {u[i]}' if i else f'{int(n)} {u[i]}')"
+  fi
+}
+
+save_archive() {
+  local out="$1"
+  mkdir -p "$(dirname "$out")"
+  local tmp="${out}.tmp.$$"
+  info "writing archive…"
+  if ! docker save "$TAG" | gzip -c > "$tmp"; then
+    rm -f "$tmp"
+    err "docker save failed"
+    exit 1
+  fi
+  mv "$tmp" "$out"
+  local size sha=""
+  size="$(human_size "$out")"
+  if command -v shasum >/dev/null 2>&1; then
+    sha="$(shasum -a 256 "$out" | awk '{print $1}')"
+  fi
+  printf '\n'
+  ok "Docker image archive ready"
+  printf '  %sArchive:%s  %s%s%s\n' "$C_BOLD" "$C_RESET" "$C_GREEN" "$out" "$C_RESET"
+  printf '  %sSize:%s     %s\n' "$C_DIM" "$C_RESET" "$size"
+  printf '  %sImage:%s    %s\n' "$C_DIM" "$C_RESET" "$TAG"
+  [[ -n "$VERSION" ]] && printf '  %sVersion:%s  %s\n' "$C_DIM" "$C_RESET" "$VERSION"
+  [[ -n "$sha" ]] && printf '  %ssha256:%s   %s\n' "$C_DIM" "$C_RESET" "$sha"
+  printf '\n'
+  info "load later with:  docker load < $(printf '%q' "$out")"
+}
+
+cmd_build() {
+  need_docker
+  apply_version_tag
+  local -a args=(build --platform "$PLATFORM" -t "$TAG")
+  [[ "$NO_CACHE" -eq 1 ]] && args+=(--no-cache)
+  [[ "$PULL" -eq 1 ]] && args+=(--pull)
+  if [[ -n "$VERSION" ]]; then
+    args+=(--build-arg "COLLECTEMOI_VERSION=${VERSION}")
+  fi
+  local want_archive=0
+  local out=""
+  if [[ -n "$OUT" ]]; then
+    want_archive=1
+    out="$(resolve_out_path "$OUT")"
+  elif [[ -n "$VERSION" && "$NO_ARCHIVE" -eq 0 ]]; then
+    want_archive=1
+    out="$(resolve_out_path "")"
+  fi
+  info "building $TAG ($PLATFORM)"
+  [[ -n "$VERSION" ]] && info "version: $VERSION (admin UI + binaries)"
+  [[ "$want_archive" -eq 1 ]] && info "archive will be: $out"
+  info "context: $ROOT"
+  (
+    cd "$ROOT"
+    docker "${args[@]}" .
+  )
+  ok "image ready: $TAG"
+  docker image inspect "$TAG" --format '{{.Id}}  {{.Size}}' 2>/dev/null \
+    | awk '{print "  "$0}' || true
+  if [[ "$want_archive" -eq 1 ]]; then
+    save_archive "$out"
+  elif [[ -n "$VERSION" && "$NO_ARCHIVE" -eq 1 ]]; then
+    info "skipped archive (--no-archive); image only: $TAG"
+  fi
+}
+
+cmd_package() {
+  need_docker
+  docker buildx version >/dev/null 2>&1 || { err "Docker Buildx is required for package"; exit 1; }
+  EXTRA=()
+  parse_common 0 "$@"
+  apply_version_tag
+  local out
+  out="$(resolve_out_path "$OUT")"
+  info "building $TAG ($PLATFORM) via buildx"
+  [[ -n "$VERSION" ]] && info "version: $VERSION"
+  info "archive will be: $out"
+  (
+    cd "$ROOT"
+    local -a bx=(buildx build --platform "$PLATFORM" --tag "$TAG" --load)
+    [[ "$NO_CACHE" -eq 1 ]] && bx+=(--no-cache)
+    [[ "$PULL" -eq 1 ]] && bx+=(--pull)
+    [[ -n "$VERSION" ]] && bx+=(--build-arg "COLLECTEMOI_VERSION=${VERSION}")
+    docker "${bx[@]}" .
+  )
+  ok "image ready: $TAG"
+  save_archive "$out"
+}
+
+cmd_up() {
+  need_docker
+  EXTRA=()
+  parse_common 1 "$@"
+  apply_version_tag
+  ensure_data_volume
+  export DOCKER_DEFAULT_PLATFORM="$PLATFORM"
+  [[ -n "$VERSION" ]] && export COLLECTEMOI_VERSION="$VERSION"
+  export COLLECTEMOI_DOCKER_TAG="$TAG"
+  export COLLECTEMOI_DOCKER_VOLUME="$VOLUME"
+  info "compose up --build (platform $PLATFORM) — data volume $VOLUME kept"
+  [[ -n "$VERSION" ]] && info "version: $VERSION → $TAG"
+  (
+    cd "$ROOT"
+    if [[ ${#EXTRA[@]} -gt 0 ]]; then
+      docker compose up --build "${EXTRA[@]}"
+    else
+      docker compose up --build
+    fi
+  )
+}
+
+# Rebuild/recreate containers onto the same named volume (never wipe data).
+cmd_update() {
+  need_docker
+  EXTRA=()
+  parse_common 1 "$@"
+  apply_version_tag
+  ensure_data_volume
+  export DOCKER_DEFAULT_PLATFORM="$PLATFORM"
+  [[ -n "$VERSION" ]] && export COLLECTEMOI_VERSION="$VERSION"
+  export COLLECTEMOI_DOCKER_TAG="$TAG"
+  export COLLECTEMOI_DOCKER_VOLUME="$VOLUME"
+  info "updating stack to $TAG (data volume $VOLUME is preserved)"
+  [[ -n "$VERSION" ]] && info "version: $VERSION"
+  (
+    cd "$ROOT"
+    # Recreate containers with the new image; do not pass -v to compose down.
+    if [[ ${#EXTRA[@]} -gt 0 ]]; then
+      docker compose up --build --force-recreate --remove-orphans "${EXTRA[@]}"
+    else
+      docker compose up --build --force-recreate --remove-orphans -d
+      ok "stack updated; data volume $VOLUME unchanged"
+      info "follow logs: docker compose logs -f"
+    fi
+  )
+}
+
+# Load a portable image archive, then recreate containers (data kept).
+cmd_load() {
+  need_docker
+  local archive=""
+  EXTRA=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) usage; exit 0 ;;
+      --version|-V|--tag|--platform|--volume|--out|--yes|-y|--no-cache|--pull|-q|--quiet)
+        break
+        ;;
+      --*)
+        break
+        ;;
+      *)
+        if [[ -z "$archive" ]]; then
+          archive="$1"
+          shift
+        else
+          break
+        fi
+        ;;
+    esac
+  done
+  [[ -n "$archive" ]] || { err "usage: $(basename "$0") load <archive.tar.gz> [options]"; exit 1; }
+  [[ -f "$archive" ]] || { err "archive not found: $archive"; exit 1; }
+  parse_common 1 "$@"
+  apply_version_tag
+  ensure_data_volume
+  info "loading image from $archive (data volume $VOLUME will be reused)"
+  local load_out
+  load_out="$(docker load -i "$archive")"
+  printf '%s\n' "$load_out" | sed 's/^/  /'
+  if [[ "$TAG_EXPLICIT" -eq 0 && -z "$VERSION" ]]; then
+    local loaded_tag=""
+    loaded_tag="$(printf '%s\n' "$load_out" | awk -F': ' '/Loaded image:/{print $2}' | tail -1)"
+    if [[ -n "$loaded_tag" ]]; then
+      TAG="$loaded_tag"
+      info "using loaded image tag: $TAG"
+    fi
+  fi
+  ok "image loaded: $TAG"
+  export DOCKER_DEFAULT_PLATFORM="$PLATFORM"
+  [[ -n "$VERSION" ]] && export COLLECTEMOI_VERSION="$VERSION"
+  export COLLECTEMOI_DOCKER_TAG="$TAG"
+  export COLLECTEMOI_DOCKER_VOLUME="$VOLUME"
+  (
+    cd "$ROOT"
+    if [[ ${#EXTRA[@]} -gt 0 ]]; then
+      docker compose up -d --force-recreate --remove-orphans "${EXTRA[@]}"
+    else
+      docker compose up -d --force-recreate --remove-orphans
+    fi
+  )
+  ok "update complete — data volume $VOLUME preserved"
+}
+
+cmd_wipe_data() {
+  need_docker
+  EXTRA=()
+  parse_common 0 "$@"
+  if [[ "$YES" -ne 1 ]]; then
+    err "refusing to wipe data without --yes"
+    info "this deletes Docker volume $VOLUME (SQLite, uploads, TLS, keys, …)"
+    info "usage: $(basename "$0") wipe-data --yes"
+    exit 1
+  fi
+  warn "stopping compose services (volume not removed by down)…"
+  (
+    cd "$ROOT"
+    docker compose down >/dev/null 2>&1 || true
+  )
+  # Also stop common one-shot / push container names if present.
+  docker rm -f collectemoi collectemoi-api collectemoi-worker \
+    collectemoi-test-api collectemoi-test-worker >/dev/null 2>&1 || true
+  if docker volume inspect "$VOLUME" >/dev/null 2>&1; then
+    warn "removing volume $VOLUME"
+    docker volume rm "$VOLUME"
+    ok "data volume $VOLUME deleted"
+  else
+    info "volume $VOLUME already absent"
+  fi
+}
+
+cmd_run() {
+  need_docker
+  EXTRA=()
+  parse_common 1 "$@"
+  apply_version_tag
+  ensure_data_volume
+  # Always mount the named data volume (even when EXTRA has custom ports).
+  local -a run_args=()
+  if [[ ${#EXTRA[@]} -eq 0 ]]; then
+    run_args=(-p 8080:8080 -p 8081:8081 -v "${VOLUME}:/data")
+  else
+    run_args=("${EXTRA[@]}")
+    if ! run_args_have_data_mount "${run_args[@]}"; then
+      run_args=(-v "${VOLUME}:/data" "${run_args[@]}")
+      info "attaching data volume $VOLUME → /data (survives --rm / image replace)"
+    fi
+  fi
+  info "ensuring image $TAG exists"
+  if ! docker image inspect "$TAG" >/dev/null 2>&1; then
+    # cmd_build re-parses; call the build body with current VERSION/TAG.
+    NO_ARCHIVE=1
+    cmd_build
+  fi
+  info "docker run --rm … $TAG all  (volume $VOLUME kept after exit)"
+  docker run --rm --platform "$PLATFORM" "${run_args[@]}" "$TAG" all
+}
+
+main() {
+  local cmd="build"
+  if [[ $# -gt 0 ]]; then
+    case "$1" in
+      build|package|up|update|load|run|wipe-data) cmd="$1"; shift ;;
+      -h|--help) usage; exit 0 ;;
+      --*) ;; # options for default build
+      *) err "unknown command: $1"; usage >&2; exit 1 ;;
+    esac
+  fi
+  EXTRA=()
+  case "$cmd" in
+    build)
+      parse_common 0 "$@"
+      cmd_build
+      ;;
+    package) cmd_package "$@" ;;
+    up) cmd_up "$@" ;;
+    update) cmd_update "$@" ;;
+    load) cmd_load "$@" ;;
+    run) cmd_run "$@" ;;
+    wipe-data) cmd_wipe_data "$@" ;;
+  esac
+}
+
+main "$@"

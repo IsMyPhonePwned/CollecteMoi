@@ -1,0 +1,50 @@
+# Optional single-container stack (API + worker in one process tree).
+# Prefer docker-compose.yml for production-like setups.
+#
+#   ./scripts/collectemoi-docker up   # or:
+#   docker volume create collectemoi-data
+#   docker compose -f docker-compose.single.yml up --build
+#
+# Data: external named volume `collectemoi-data` (survives image updates).
+
+name: collectemoi-single
+
+services:
+  collectemoi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        COLLECTEMOI_VERSION: ${COLLECTEMOI_VERSION:-}
+    image: ${COLLECTEMOI_DOCKER_TAG:-collectemoi:local}
+    platform: ${COLLECTEMOI_DOCKER_PLATFORM:-linux/amd64}
+    container_name: collectemoi
+    restart: unless-stopped
+    ports:
+      - "${COLLECTEMOI_PORT:-8080}:8080"
+      - "${COLLECTEMOI_HTTP_PORT:-8081}:8081"
+    environment:
+      COLLECTEMOI_DATA_DIR: /data
+      COLLECTEMOI_REPO: /opt/collectemoi
+      COLLECTEMOI_VERSION: ${COLLECTEMOI_VERSION:-}
+      COLLECTEMOI_BIND: 0.0.0.0:8080
+      COLLECTEMOI_PUBLIC_URL: ${COLLECTEMOI_PUBLIC_URL:-https://127.0.0.1:8080}
+      COLLECTEMOI_HTTP_BIND: 0.0.0.0:8081
+      COLLECTEMOI_LAB_SEAL: ${COLLECTEMOI_LAB_SEAL:-true}
+      COLLECTEMOI_WORKER_POLL_SECS: ${COLLECTEMOI_WORKER_POLL_SECS:-2}
+      COLLECTEMOI_OTP_WEBHOOK_URL: ${COLLECTEMOI_OTP_WEBHOOK_URL:-}
+      COLLECTEMOI_OTP_WEBHOOK_TOKEN: ${COLLECTEMOI_OTP_WEBHOOK_TOKEN:-}
+      ANDROID_HOME: /opt/android-sdk
+      ANDROID_SDK_ROOT: /opt/android-sdk
+      FLUTTER_HOME: /opt/flutter
+      FLUTTER_ROOT: /opt/flutter
+      PUB_CACHE: /data/.pub-cache
+      GRADLE_USER_HOME: /data/.gradle
+    volumes:
+      - collectemoi_data:/data
+    command: ["all"]
+
+volumes:
+  collectemoi_data:
+    name: ${COLLECTEMOI_DOCKER_VOLUME:-collectemoi-data}
+    external: true

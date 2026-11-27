@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="upload_channel_name">Uploads</string>
+    <string name="upload_channel_desc">Shown while CollecteMoi uploads artefacts in the background</string>
+    <string name="upload_result_channel_name">Upload results</string>
+    <string name="upload_result_channel_desc">Shown when a CollecteMoi upload finishes</string>
+    <string name="upload_notif_title_default">Uploading…</string>
+    <string name="upload_notif_text_default">CollecteMoi is sending a file in the background.</string>
+</resources>

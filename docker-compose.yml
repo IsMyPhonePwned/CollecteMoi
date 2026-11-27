@@ -1,0 +1,86 @@
+# CollecteMoi — API + worker with shared persistent data.
+#
+# Quick start / upgrade (data is kept):
+#   ./scripts/collectemoi-docker up
+#   ./scripts/collectemoi-docker update --version 1.4.0
+#
+# Admin UI (self-signed HTTPS): https://127.0.0.1:8080/admin
+# Plain HTTP companion (lab):   http://127.0.0.1:8081/admin
+# Health:                       http://127.0.0.1:8081/healthz
+#
+# Stop (keeps data):
+#   docker compose down
+#
+# Data lives in the external named volume `collectemoi-data` (see volumes:).
+# Image rebuilds / container recreate never touch it. `compose down -v` also
+# cannot remove an external volume — wipe only via:
+#   ./scripts/collectemoi-docker wipe-data
+
+name: collectemoi
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        COLLECTEMOI_VERSION: ${COLLECTEMOI_VERSION:-}
+    image: ${COLLECTEMOI_DOCKER_TAG:-collectemoi:local}
+    # Google Android cmdline-tools are x86_64; pin amd64 on Apple Silicon hosts.
+    platform: ${COLLECTEMOI_DOCKER_PLATFORM:-linux/amd64}
+    container_name: collectemoi-api
+    restart: unless-stopped
+    ports:
+      - "${COLLECTEMOI_PORT:-8080}:8080"
+      - "${COLLECTEMOI_HTTP_PORT:-8081}:8081"
+    environment:
+      COLLECTEMOI_DATA_DIR: /data
+      COLLECTEMOI_REPO: /opt/collectemoi
+      COLLECTEMOI_VERSION: ${COLLECTEMOI_VERSION:-}
+      COLLECTEMOI_BIND: 0.0.0.0:8080
+      COLLECTEMOI_PUBLIC_URL: ${COLLECTEMOI_PUBLIC_URL:-https://127.0.0.1:8080}
+      COLLECTEMOI_HTTP_BIND: 0.0.0.0:8081
+      COLLECTEMOI_LAB_SEAL: ${COLLECTEMOI_LAB_SEAL:-true}
+      COLLECTEMOI_OTP_WEBHOOK_URL: ${COLLECTEMOI_OTP_WEBHOOK_URL:-}
+      COLLECTEMOI_OTP_WEBHOOK_TOKEN: ${COLLECTEMOI_OTP_WEBHOOK_TOKEN:-}
+      ANDROID_HOME: /opt/android-sdk
+      ANDROID_SDK_ROOT: /opt/android-sdk
+      FLUTTER_HOME: /opt/flutter
+      FLUTTER_ROOT: /opt/flutter
+      PUB_CACHE: /data/.pub-cache
+      GRADLE_USER_HOME: /data/.gradle
+    volumes:
+      - collectemoi_data:/data
+    command: ["api"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8081/healthz"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  worker:
+    image: ${COLLECTEMOI_DOCKER_TAG:-collectemoi:local}
+    platform: ${COLLECTEMOI_DOCKER_PLATFORM:-linux/amd64}
+    container_name: collectemoi-worker
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      COLLECTEMOI_DATA_DIR: /data
+      COLLECTEMOI_VERSION: ${COLLECTEMOI_VERSION:-}
+      COLLECTEMOI_WORKER_POLL_SECS: ${COLLECTEMOI_WORKER_POLL_SECS:-2}
+    volumes:
+      - collectemoi_data:/data
+    command: ["worker"]
+    # Worker has no HTTP listener; inherit would flap on the image HEALTHCHECK.
+    healthcheck:
+      disable: true
+
+volumes:
+  # External so upgrades and `docker compose down -v` cannot erase lab data.
+  # Created automatically by ./scripts/collectemoi-docker (volume create).
+  collectemoi_data:
+    name: ${COLLECTEMOI_DOCKER_VOLUME:-collectemoi-data}
+    external: true

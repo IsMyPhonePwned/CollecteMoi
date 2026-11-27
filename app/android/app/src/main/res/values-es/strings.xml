@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="upload_channel_name">Cargas</string>
+    <string name="upload_channel_desc">Se muestra mientras CollecteMoi envía archivos en segundo plano</string>
+    <string name="upload_result_channel_name">Resultados de carga</string>
+    <string name="upload_result_channel_desc">Se muestra cuando termina una carga de CollecteMoi</string>
+    <string name="upload_notif_title_default">Cargando…</string>
+    <string name="upload_notif_text_default">CollecteMoi está enviando un archivo en segundo plano.</string>
+</resources>
