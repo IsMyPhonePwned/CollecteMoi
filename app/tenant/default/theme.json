@@ -6,15 +6,15 @@
   "launcher_icon": {
     "enabled": true,
     "source": "logo",
-    "text": "CERT",
+    "text": "",
     "font": "system",
-    "size": 15,
-    "x": 69,
-    "y": 86,
-    "scale": 87,
+    "size": 14,
+    "x": 50,
+    "y": 82,
+    "scale": 100,
     "rotation": 0,
-    "color": "#F00000",
-    "badge": true,
+    "color": "#FFFFFF",
+    "badge": false,
     "badge_color": "#000000",
     "badge_opacity": 0
   }

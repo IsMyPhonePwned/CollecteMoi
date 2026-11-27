@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use axum::{
     Json,
     extract::{Query, State},
-    http::StatusCode,
-    response::{Html, IntoResponse},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
+    response::{Html, IntoResponse, Response},
 };
 use serde::Serialize;
 use serde_json::json;
@@ -19,9 +19,33 @@ use crate::AppState;
 use crate::settings::SettingsPatch;
 
 const ADMIN_HTML: &str = include_str!("../static/admin.html");
+const ADMIN_LOGO_PNG: &[u8] = include_bytes!("../static/img/logo.png");
+const ADMIN_FAVICON_PNG: &[u8] = include_bytes!("../static/img/favicon.png");
 
 pub async fn console() -> Html<&'static str> {
     Html(ADMIN_HTML)
+}
+
+fn png_response(bytes: &'static [u8]) -> Response {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("image/png"),
+    );
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=86400"),
+    );
+    (headers, bytes).into_response()
+}
+
+/// Lab console mark (not used by the Flutter mobile client).
+pub async fn console_logo() -> Response {
+    png_response(ADMIN_LOGO_PNG)
+}
+
+pub async fn console_favicon() -> Response {
+    png_response(ADMIN_FAVICON_PNG)
 }
 
 #[derive(Debug, Clone, Serialize)]

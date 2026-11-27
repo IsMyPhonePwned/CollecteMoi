@@ -1,5 +1,9 @@
 # CollecteMoi
 
+<p align="center">
+  <img src="docs/assets/logo.png" alt="CollecteMoi" width="160" />
+</p>
+
 White-label Flutter app (Android, iOS, web lab) + Rust server that moves forensic artefacts — Android bugreport, iOS sysdiagnose, suspicious messages — from a phone to the lab, encrypted as **CM01** envelopes to the case key.
 
 Deep design notes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
